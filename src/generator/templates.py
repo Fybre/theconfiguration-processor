@@ -1263,12 +1263,8 @@ document.addEventListener('DOMContentLoaded', function() {
         });
     }
 
-    // Collapsible navigation sections - default to collapsed (except first/Overview)
-    document.querySelectorAll('.nav-section').forEach((section, index) => {
-        if (index > 0) {  // Keep Overview expanded
-            section.classList.add('collapsed');
-        }
-    });
+    // Collapsible navigation sections - default to expanded
+    // (click handlers are set up below to allow toggling)
 
     document.querySelectorAll('.nav-section-header').forEach(header => {
         header.addEventListener('click', function() {
@@ -1423,10 +1419,8 @@ document.addEventListener('DOMContentLoaded', function() {
         });
     }
 
-    // Collapsible item details - default to collapsed
-    document.querySelectorAll('.item-detail').forEach(item => {
-        item.classList.add('collapsed');
-    });
+    // Collapsible item details - default to expanded
+    // (click handlers are set up below to allow toggling)
 
     document.querySelectorAll('.item-detail-header').forEach(header => {
         header.style.cursor = 'pointer';

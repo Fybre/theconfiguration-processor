@@ -1,24 +1,10 @@
-version: "3.8"
-
 services:
   configuration-processor:
     build: .
-    container_name: configuration-processor
-    volumes:
-      - ./output:/app/output
-      - ./samples:/app/samples
-    environment:
-      - PYTHONUNBUFFERED=1
-    healthcheck:
-      test: ["CMD", "python", "-c", "import sys; sys.exit(0)"]
-      interval: 30s
-      timeout: 3s
-      retries: 3
+    container_name: theconfiguration-processor
     ports:
       - "5050:5050"
-    command: ["python", "-m", "src.web"]
+    volumes:
+      - ./samples:/app/samples:ro
+      - ./output:/app/output
     restart: unless-stopped
-
-volumes:
-  output:
-  samples:

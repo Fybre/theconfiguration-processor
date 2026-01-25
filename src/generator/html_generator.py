@@ -264,7 +264,7 @@ class HTMLGenerator:
         title = f"Validation Issues ({len(issues)})"
 
         return f'''
-        <div class="card {card_class} collapsible-card collapsed">
+        <div class="card {card_class} collapsible-card">
             <div class="card-header collapsible-header" onclick="this.parentElement.classList.toggle('collapsed')">
                 <span class="expand-icon">&#9660;</span>
                 <h2>{title}</h2>
@@ -664,7 +664,7 @@ class HTMLGenerator:
         security_section = self._render_object_security(3, category.category_no, category.sub_category_field_no)
 
         return f'''
-        <div class="nested-item collapsed" id="{cat_id}">
+        <div class="nested-item" id="{cat_id}">
             <div class="nested-item-header" onclick="this.parentElement.classList.toggle('collapsed')">
                 <span class="expand-icon">&#9660;</span>
                 <strong>{escape_html(category.name)}</strong>
@@ -906,7 +906,7 @@ class HTMLGenerator:
 
         # Use a custom section without the count for Design Structure
         return f'''
-        <section id="folders" class="section collapsible-section collapsed">
+        <section id="folders" class="section collapsible-section">
             <div class="section-header collapsible-header" onclick="this.parentElement.classList.toggle('collapsed')">
                 <span class="expand-icon">&#9660;</span>
                 <h2>Design Structure</h2>
