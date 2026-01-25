@@ -1,0 +1,93 @@
+[build-system]
+requires = ["setuptools>=61.0", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "theconfiguration-processor"
+version = "1.0.0"
+description = "Generate HTML documentation from Therefore document management system configuration exports"
+readme = "README.md"
+license = {text = "MIT"}
+requires-python = ">=3.9"
+authors = [
+    {name = "Configuration Processor Team"}
+]
+keywords = [
+    "therefore",
+    "document-management",
+    "configuration",
+    "documentation",
+    "xml",
+    "html"
+]
+classifiers = [
+    "Development Status :: 4 - Beta",
+    "Environment :: Console",
+    "Environment :: MacOS X",
+    "Environment :: Win32 (MS Windows)",
+    "Environment :: X11 Applications :: GTK",
+    "Intended Audience :: System Administrators",
+    "Intended Audience :: Information Technology",
+    "License :: OSI Approved :: MIT License",
+    "Operating System :: OS Independent",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.9",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Topic :: Documentation",
+    "Topic :: System :: Systems Administration",
+    "Topic :: Text Processing :: Markup :: HTML",
+    "Topic :: Text Processing :: Markup :: XML",
+]
+
+# No external dependencies - uses only Python standard library
+dependencies = []
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=7.0.0",
+    "pytest-cov>=4.0.0",
+]
+build = [
+    "pyinstaller>=5.0.0",
+]
+web = [
+    "flask>=2.0.0",
+]
+
+[project.scripts]
+theconfiguration-processor = "src.main:main"
+theconfiguration-processor-web = "src.web:main"
+
+[project.gui-scripts]
+theconfiguration-processor-gui = "src.gui:main"
+
+[project.urls]
+Homepage = "https://github.com/example/theconfiguration-processor"
+Documentation = "https://github.com/example/theconfiguration-processor#readme"
+Repository = "https://github.com/example/theconfiguration-processor"
+Issues = "https://github.com/example/theconfiguration-processor/issues"
+
+[tool.setuptools.packages.find]
+where = ["."]
+include = ["src*"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+python_files = ["test_*.py"]
+python_classes = ["Test*"]
+python_functions = ["test_*"]
+addopts = "-v --tb=short"
+
+[tool.coverage.run]
+source = ["src"]
+omit = ["tests/*", "src/gui.py"]
+
+[tool.coverage.report]
+exclude_lines = [
+    "pragma: no cover",
+    "def __repr__",
+    "raise NotImplementedError",
+    "if __name__ == .__main__.:",
+]

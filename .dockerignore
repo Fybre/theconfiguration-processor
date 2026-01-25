@@ -1,0 +1,31 @@
+# Docker ignore file
+
+# Ignore virtual environment
+venv/
+.env/
+
+# Ignore Python cache
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+
+# Ignore IDE files
+.vscode/
+.idea/
+
+# Ignore git files
+.git/
+.gitignore
+
+# Ignore output directories
+output/
+output-test/
+
+# Ignore build artifacts
+dist/
+build/
+*.egg-info/
+
+# Ignore system files
+.DS_Store
