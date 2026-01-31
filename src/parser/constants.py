@@ -3,6 +3,36 @@ Therefore DB Codes - Lookup tables for integer codes in the Therefore database s
 Based on "Therefore 2020 DB Codes.pdf"
 """
 
+# Object Type Constants (for use in code instead of magic numbers)
+class ObjectType:
+    """Constants for Therefore object types."""
+    SERVER = 1
+    DOCUMENT = 2
+    CATEGORY = 3
+    CATEGORY_FIELD = 4
+    DATATYPE = 5
+    QUERY = 10
+    USER = 11
+    GROUP = 12
+    FOLDER = 17
+    WORKFLOW_PROCESS = 19
+    WORKFLOW_TASK = 20
+    KEYWORD_DICTIONARY = 22
+    TREE_VIEW = 28
+    COUNTER = 32
+    CASE_DEFINITION = 37
+    STAMP = 40
+    EFORM = 47
+    ROLE = 51
+
+
+class UserType:
+    """Constants for Therefore user types."""
+    USER = 1
+    GROUP = 2
+    SYSTEM = 3
+
+
 # TheActno*.TypeNo - Object Types
 OBJECT_TYPES = {
     1: "Server",

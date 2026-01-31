@@ -56,6 +56,10 @@ class ConfigurationParser:
         version_elem = root.find("Version")
         if version_elem is not None:
             self.config.version = version_elem.text or ""
+            try:
+                self.config.version_int = int(version_elem.text)
+            except (ValueError, TypeError):
+                self.config.version_int = 0
 
         # Parse all configuration sections
         self._parse_folders(root)
@@ -99,6 +103,10 @@ class ConfigurationParser:
         version_elem = root.find("Version")
         if version_elem is not None:
             self.config.version = version_elem.text or ""
+            try:
+                self.config.version_int = int(version_elem.text)
+            except (ValueError, TypeError):
+                self.config.version_int = 0
 
         # Parse all configuration sections
         self._parse_folders(root)

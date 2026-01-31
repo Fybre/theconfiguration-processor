@@ -2,6 +2,7 @@
 
 from flask import Flask, request, render_template_string, Response, send_file
 from io import BytesIO
+from . import __version__
 from .parser.config_parser import ConfigurationParser
 from .generator.html_generator import HTMLGenerator
 
@@ -138,6 +139,11 @@ UPLOAD_PAGE = """
         @keyframes spin {
             to { transform: rotate(360deg); }
         }
+        .version {
+            margin-top: 24px;
+            font-size: 0.75rem;
+            color: #a0aec0;
+        }
     </style>
 </head>
 <body>
@@ -165,6 +171,7 @@ UPLOAD_PAGE = """
                 </span>
             </button>
         </form>
+        <p class="version">v{{ version }}</p>
     </div>
 
     <script>
@@ -304,6 +311,10 @@ RESULT_PAGE = """
             color: #718096;
             font-size: 0.85rem;
         }
+        .version {
+            font-size: 0.7rem;
+            opacity: 0.7;
+        }
         .iframe-container {
             height: calc(100vh - 130px);
         }
@@ -324,6 +335,7 @@ RESULT_PAGE = """
             <a href="/" class="btn btn-secondary">
                 <span>📄</span> New File
             </a>
+            <span class="version">v{{ version }}</span>
         </div>
     </div>
     <div class="stats">
@@ -355,14 +367,14 @@ def upload():
 
     if request.method == 'POST':
         if 'file' not in request.files:
-            return render_template_string(UPLOAD_PAGE, error="No file selected")
+            return render_template_string(UPLOAD_PAGE, error="No file selected", version=__version__)
 
         file = request.files['file']
         if file.filename == '':
-            return render_template_string(UPLOAD_PAGE, error="No file selected")
+            return render_template_string(UPLOAD_PAGE, error="No file selected", version=__version__)
 
         if not file.filename.lower().endswith('.xml'):
-            return render_template_string(UPLOAD_PAGE, error="Please upload an XML file")
+            return render_template_string(UPLOAD_PAGE, error="Please upload an XML file", version=__version__)
 
         try:
             # Parse the XML
@@ -392,12 +404,12 @@ def upload():
                 ("Dictionaries", stats_dict.get("keyword_dictionaries", 0)),
             ]
 
-            return render_template_string(RESULT_PAGE, title=title, stats=stats)
+            return render_template_string(RESULT_PAGE, title=title, stats=stats, version=__version__)
 
         except Exception as e:
-            return render_template_string(UPLOAD_PAGE, error=f"Error processing file: {str(e)}")
+            return render_template_string(UPLOAD_PAGE, error=f"Error processing file: {str(e)}", version=__version__)
 
-    return render_template_string(UPLOAD_PAGE, error=None)
+    return render_template_string(UPLOAD_PAGE, error=None, version=__version__)
 
 
 @app.route('/preview')

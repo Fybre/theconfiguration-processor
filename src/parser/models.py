@@ -4,6 +4,8 @@ from dataclasses import dataclass, field
 from typing import Optional, List, Dict, Any
 import re
 
+from .constants import ObjectType, UserType
+
 
 def _slugify(text: str) -> str:
     """Convert text to URL-friendly slug."""
@@ -444,6 +446,7 @@ class RetentionPolicy:
 class Configuration:
     """Represents the complete Therefore configuration."""
     version: str = ""
+    version_int: int = 0  # Numeric version for comparison
     categories: List[Category] = field(default_factory=list)
     case_definitions: List[CaseDefinition] = field(default_factory=list)
     workflows: List[WorkflowProcess] = field(default_factory=list)
@@ -671,8 +674,8 @@ class Configuration:
             "workflows": len(self.workflows),
             "workflow_tasks": sum(len(w.tasks) for w in self.workflows),
             "folders": len(self._flatten_folders(self.folders)),
-            "users": len([u for u in self.users if u.user_type == 1]),
-            "groups": len([u for u in self.users if u.user_type == 2]),
+            "users": len([u for u in self.users if u.user_type == UserType.USER]),
+            "groups": len([u for u in self.users if u.user_type == UserType.GROUP]),
             "roles": len(self.roles),
             "eforms": len(self.eforms),
             "queries": len(self.queries),
@@ -683,6 +686,25 @@ class Configuration:
             "stamps": len(self.stamps),
             "retention_policies": len(self.retention_policies),
         }
+
+    def is_version_supported(self, supported_version: int) -> bool:
+        """Check if the configuration version is supported."""
+        return self.version_int <= supported_version
+
+    def get_version_warning(self, supported_version: int) -> Optional[str]:
+        """
+        Get a warning message if the configuration version is newer than supported.
+
+        Returns:
+            Warning message string if version is newer, None if supported.
+        """
+        if self.version_int > supported_version:
+            return (
+                f"This configuration was exported from a newer version of Therefore "
+                f"(schema version {self.version_int}) than currently supported "
+                f"({supported_version}). Some features may not be fully documented."
+            )
+        return None
 
     def get_counter_usage(self) -> Dict[int, List[tuple]]:
         """Get counter usage - which categories/fields use each counter."""
@@ -706,6 +728,55 @@ class Configuration:
     def get_treeviews_for_category(self, category_no: int) -> List["TreeView"]:
         """Get tree views that are linked to a specific category."""
         return [tv for tv in self.tree_views if tv.category_no == category_no]
+
+    def get_root_security(self) -> List[RoleAssignment]:
+        """Get role assignments for the root level (Folder with ObjNo=0)."""
+        return [ra for ra in self.role_assignments
+                if ra.obj_type == ObjectType.FOLDER and ra.obj_no == 0]
+
+    def get_folder_security(self, folder_no: int) -> List[RoleAssignment]:
+        """Get role assignments for a specific folder."""
+        return [ra for ra in self.role_assignments
+                if ra.obj_type == ObjectType.FOLDER and ra.obj_no == folder_no]
+
+    def folder_stops_inheritance(self, folder_no: int) -> bool:
+        """Check if a folder stops inheritance (has StopInh=1 with RoleNo=0)."""
+        assignments = self.get_folder_security(folder_no)
+        return any(ra.stop_inheritance and ra.role_no == 0 for ra in assignments)
+
+    def get_all_security_assignments(self) -> Dict[str, List[RoleAssignment]]:
+        """
+        Get all security assignments organized by object type.
+
+        Returns:
+            Dict with keys: 'root', 'folders', 'categories', 'workflows', etc.
+            Each value is a list of RoleAssignment objects
+        """
+        result = {
+            'root': [],
+            'folders': [],
+            'categories': [],
+            'workflows': [],
+            'queries': [],
+            'other': []
+        }
+
+        for ra in self.role_assignments:
+            if ra.obj_type == ObjectType.FOLDER:
+                if ra.obj_no == 0:
+                    result['root'].append(ra)
+                else:
+                    result['folders'].append(ra)
+            elif ra.obj_type == ObjectType.CATEGORY:
+                result['categories'].append(ra)
+            elif ra.obj_type == ObjectType.WORKFLOW_PROCESS:
+                result['workflows'].append(ra)
+            elif ra.obj_type == ObjectType.QUERY:
+                result['queries'].append(ra)
+            else:
+                result['other'].append(ra)
+
+        return result
 
     def validate(self) -> List[Dict[str, Any]]:
         """

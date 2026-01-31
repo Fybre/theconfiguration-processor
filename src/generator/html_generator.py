@@ -4,11 +4,13 @@ from pathlib import Path
 from datetime import datetime
 from typing import List, Dict
 
+from .. import __version__, SUPPORTED_CONFIG_VERSION
 from ..parser.models import (
     Configuration, Category, CaseDefinition, WorkflowProcess, Folder, Role,
     EForm, Query, KeywordDictionary, TreeView, Counter, DataType, Stamp,
     RetentionPolicy
 )
+from ..parser.constants import ObjectType, UserType
 from ..utils.helpers import escape_html, slugify
 from .templates import (
     CSS_STYLES, JAVASCRIPT, HTML_HEAD, HTML_FOOTER, SIDEBAR_TEMPLATE,
@@ -94,7 +96,7 @@ class HTMLGenerator:
         parts.append('</div>')  # Close layout
 
         # Footer with JavaScript
-        parts.append(HTML_FOOTER.format(javascript=JAVASCRIPT))
+        parts.append(HTML_FOOTER.format(javascript=JAVASCRIPT, app_version=__version__))
 
         return '\n'.join(parts)
 
@@ -165,8 +167,8 @@ class HTMLGenerator:
 
         # Add Users & Groups section after Roles (or at the tracked position)
         if self.config.users:
-            groups = [u for u in self.config.users if u.user_type == 2]
-            users = [u for u in self.config.users if u.user_type == 1]
+            groups = [u for u in self.config.users if u.user_type == UserType.GROUP]
+            users = [u for u in self.config.users if u.user_type == UserType.USER]
             users_section = NAV_SECTION_TEMPLATE.format(
                 title="Users & Groups",
                 count=len(self.config.users),
@@ -214,16 +216,42 @@ class HTMLGenerator:
                     label=label
                 ))
 
+        # Generate version warning if needed
+        version_warning_section = self._generate_version_warning_section()
+
         # Generate validation warnings section
         validation_section = self._generate_validation_section()
+
+        # Generate root security section
+        root_security_section = self._generate_root_security_section()
 
         return OVERVIEW_TEMPLATE.format(
             title=escape_html(self.title),
             stats_cards='\n'.join(stats_cards),
+            version_warning_section=version_warning_section,
             validation_section=validation_section,
+            root_security_section=root_security_section,
             version=escape_html(self.config.version or "N/A"),
             generated_date=datetime.now().strftime("%Y-%m-%d %H:%M:%S")
         )
+
+    def _generate_version_warning_section(self) -> str:
+        """Generate a warning section if the config version is newer than supported."""
+        warning = self.config.get_version_warning(SUPPORTED_CONFIG_VERSION)
+        if not warning:
+            return ""
+
+        return f'''
+        <div class="card version-warning-card">
+            <div class="card-header">
+                <span class="warning-icon">&#9888;</span>
+                <h2>Version Notice</h2>
+            </div>
+            <div class="card-body">
+                <p>{escape_html(warning)}</p>
+            </div>
+        </div>
+        '''
 
     def _generate_validation_section(self) -> str:
         """Generate the validation warnings section."""
@@ -273,6 +301,67 @@ class HTMLGenerator:
                 <ul class="validation-list">
                     {''.join(items_html)}
                 </ul>
+            </div>
+        </div>
+        '''
+
+    def _generate_root_security_section(self) -> str:
+        """Generate the root-level security section for the overview."""
+        root_assignments = self.config.get_root_security()
+
+        if not root_assignments:
+            return ""
+
+        # Group assignments by role
+        role_groups = {}
+        for ra in root_assignments:
+            role_key = ra.role_no
+            if role_key not in role_groups:
+                role_groups[role_key] = {
+                    'role_name': ra.role_name or f"Role #{ra.role_no}",
+                    'role_no': ra.role_no,
+                    'users': []
+                }
+            role_groups[role_key]['users'].append({
+                'name': ra.user_name or f"User #{ra.user_no}",
+                'user_no': ra.user_no
+            })
+
+        # Build rows
+        rows = []
+        for role_key, role_data in role_groups.items():
+            role_slug = slugify(role_data['role_name']) or str(abs(role_data['role_no']))
+            user_badges = []
+            for user in role_data['users']:
+                user_badges.append(f'<span class="badge badge-secondary">{escape_html(user["name"])}</span>')
+
+            rows.append(f'''
+                <tr>
+                    <td><a href="#role-{role_slug}">{escape_html(role_data["role_name"])}</a></td>
+                    <td>{' '.join(user_badges)}</td>
+                </tr>
+            ''')
+
+        return f'''
+        <div class="card root-security-card">
+            <div class="card-header">
+                <h2>&#128274; Root Security</h2>
+                <span class="badge badge-info">{len(root_assignments)} assignment(s)</span>
+            </div>
+            <div class="card-body">
+                <p class="text-muted" style="margin-bottom: 0.5rem;">
+                    These permissions are inherited by all objects unless explicitly overridden.
+                </p>
+                <div class="table-responsive">
+                    <table>
+                        <thead>
+                            <tr><th>Role</th><th>Users/Groups</th></tr>
+                        </thead>
+                        <tbody>
+                            {''.join(rows)}
+                        </tbody>
+                    </table>
+                </div>
             </div>
         </div>
         '''
@@ -343,7 +432,7 @@ class HTMLGenerator:
         folder_path = self.config.get_folder_path(category.folder_no) if category.folder_no else "-"
 
         # Build security section showing role assignments
-        security_section = self._render_object_security(3, category.category_no, category.sub_category_field_no)
+        security_section = self._render_object_security(ObjectType.CATEGORY, category.category_no, category.sub_category_field_no)
 
         # Build "Used by" section showing related objects
         used_by_section = self._render_category_used_by(category)
@@ -661,7 +750,7 @@ class HTMLGenerator:
             '''
 
         # Security section for the category
-        security_section = self._render_object_security(3, category.category_no, category.sub_category_field_no)
+        security_section = self._render_object_security(ObjectType.CATEGORY, category.category_no, category.sub_category_field_no)
 
         return f'''
         <div class="nested-item" id="{cat_id}">
@@ -1013,13 +1102,97 @@ class HTMLGenerator:
             if children_parts:
                 children = f'<div class="tree">{"".join(children_parts)}</div>'
 
+            # Get folder security info
+            security_badges, security_details, security_class = self._render_folder_security(folder.folder_no)
+
             items.append(FOLDER_ITEM_TEMPLATE.format(
                 name=escape_html(folder.name),
                 type=escape_html(folder.folder_type_name) if folder.folder_type > 0 else "",
-                children=children
+                children=children,
+                security_badges=security_badges,
+                security_details=security_details,
+                security_class=security_class
             ))
 
         return '\n'.join(items)
+
+    def _render_folder_security(self, folder_no: int) -> tuple:
+        """
+        Render security badges and details for a folder.
+
+        Returns:
+            Tuple of (security_badges_html, security_details_html, security_class)
+        """
+        assignments = self.config.get_folder_security(folder_no)
+
+        if not assignments:
+            return "", "", ""
+
+        # Check for stop inheritance
+        stops_inheritance = self.config.folder_stops_inheritance(folder_no)
+
+        # Filter out the "stop inheritance" marker (RoleNo=0, UserNo=0)
+        actual_assignments = [ra for ra in assignments if not (ra.role_no == 0 and ra.user_no == 0)]
+
+        # Build badges
+        badges = []
+        if stops_inheritance:
+            badges.append('<span class="badge badge-danger" title="Inheritance Stopped">&#128274; Stops Inheritance</span>')
+
+        if actual_assignments:
+            badges.append(f'<span class="badge badge-info" title="Has explicit security">&#128101; {len(actual_assignments)} assignment(s)</span>')
+
+        security_badges = " ".join(badges)
+
+        # Build security details (collapsible)
+        security_details = ""
+        if actual_assignments:
+            # Group assignments by role
+            role_groups = {}
+            for ra in actual_assignments:
+                role_key = ra.role_no
+                if role_key not in role_groups:
+                    role_groups[role_key] = {
+                        'role_name': ra.role_name or f"Role #{ra.role_no}",
+                        'role_no': ra.role_no,
+                        'users': []
+                    }
+                role_groups[role_key]['users'].append({
+                    'name': ra.user_name or f"User #{ra.user_no}",
+                    'user_no': ra.user_no
+                })
+
+            # Build rows
+            rows = []
+            for role_key, role_data in role_groups.items():
+                role_slug = slugify(role_data['role_name']) or str(abs(role_data['role_no']))
+                user_badges = []
+                for user in role_data['users']:
+                    user_badges.append(f'<span class="badge badge-secondary">{escape_html(user["name"])}</span>')
+
+                rows.append(f'''
+                    <tr>
+                        <td><a href="#role-{role_slug}">{escape_html(role_data["role_name"])}</a></td>
+                        <td>{' '.join(user_badges)}</td>
+                    </tr>
+                ''')
+
+            security_details = f'''
+            <div class="folder-security-details" style="margin-left: 1.5rem; margin-top: 0.25rem; font-size: 0.85rem;">
+                <table class="compact-table">
+                    <thead>
+                        <tr><th>Role</th><th>Users/Groups</th></tr>
+                    </thead>
+                    <tbody>
+                        {''.join(rows)}
+                    </tbody>
+                </table>
+            </div>
+            '''
+
+        security_class = " has-security" if (stops_inheritance or actual_assignments) else ""
+
+        return security_badges, security_details, security_class
 
     def _flatten_folders(self, folders: List[Folder]) -> List[Folder]:
         """Flatten folder hierarchy."""
@@ -1119,8 +1292,8 @@ class HTMLGenerator:
             return ""
 
         # Separate users and groups
-        users = [u for u in self.config.users if u.user_type == 1]
-        groups = [u for u in self.config.users if u.user_type == 2]
+        users = [u for u in self.config.users if u.user_type == UserType.USER]
+        groups = [u for u in self.config.users if u.user_type == UserType.GROUP]
 
         # Build reverse lookup: user_name -> list of group names they belong to
         user_groups_map = {}
@@ -1174,7 +1347,7 @@ class HTMLGenerator:
 
     def _render_user_or_group(self, user, user_groups_map=None) -> str:
         """Render a single user or group."""
-        is_group = user.user_type == 2
+        is_group = user.user_type == UserType.GROUP
         icon = "&#128101;" if is_group else "&#128100;"  # Group or person icon
         type_badge = "Group" if is_group else "User"
         badge_class = "primary" if is_group else ""
@@ -1227,7 +1400,7 @@ class HTMLGenerator:
         if user.members:
             member_rows = []
             for member in user.members:
-                member_type = "Group" if member.user_type == 2 else "User"
+                member_type = "Group" if member.user_type == UserType.GROUP else "User"
                 member_rows.append(f'''
                 <tr>
                     <td>{escape_html(member.user_name)}</td>

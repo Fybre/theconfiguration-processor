@@ -125,6 +125,50 @@ body {
     border-left-color: var(--danger-color);
 }
 
+/* Version warning card */
+.version-warning-card {
+    margin-bottom: 1.5rem;
+    border-left: 4px solid var(--warning-color);
+    background: #fffbeb;
+}
+
+.version-warning-card .card-header {
+    display: flex;
+    align-items: center;
+    gap: 0.75rem;
+    background: #fef3c7;
+}
+
+.version-warning-card .card-header h2 {
+    margin: 0;
+    color: #92400e;
+}
+
+.version-warning-card .warning-icon {
+    font-size: 1.25rem;
+    color: var(--warning-color);
+}
+
+.version-warning-card .card-body p {
+    color: #78350f;
+    margin: 0;
+}
+
+.root-security-card {
+    margin-bottom: 1.5rem;
+    border-left: 4px solid var(--primary-color);
+}
+
+.root-security-card .card-header {
+    display: flex;
+    align-items: center;
+    gap: 0.75rem;
+}
+
+.root-security-card .card-header h2 {
+    margin: 0;
+}
+
 .validation-list {
     list-style: none;
     padding: 0;
@@ -826,6 +870,39 @@ tr:hover {
     color: #0891b2;
 }
 
+/* Folder Security Styles */
+.tree-item.has-security > .tree-item-label {
+    background: #fef3c7;
+    padding: 0.25rem 0.5rem;
+    border-radius: 4px;
+    margin-left: -0.5rem;
+}
+
+.folder-security-details {
+    background: #f9fafb;
+    border: 1px solid var(--border-color);
+    border-radius: 4px;
+    padding: 0.5rem;
+    margin-bottom: 0.5rem;
+}
+
+.folder-security-details .compact-table {
+    width: 100%;
+    font-size: 0.8rem;
+}
+
+.folder-security-details .compact-table th,
+.folder-security-details .compact-table td {
+    padding: 0.25rem 0.5rem;
+    border-bottom: 1px solid var(--border-color);
+}
+
+.folder-security-details .compact-table th {
+    background: #f3f4f6;
+    font-weight: 600;
+    text-align: left;
+}
+
 /* Permission List */
 .permission-list {
     display: flex;
@@ -896,6 +973,25 @@ a:hover {
 .back-to-top:hover {
     background: var(--primary-hover);
     text-decoration: none;
+}
+
+/* App Footer */
+.app-footer {
+    position: fixed;
+    bottom: 0;
+    left: 0;
+    right: 0;
+    background: var(--bg-color);
+    border-top: 1px solid var(--border-color);
+    padding: 0.25rem 1rem;
+    text-align: right;
+    z-index: 999;
+}
+
+.version-info {
+    font-size: 0.7rem;
+    color: var(--text-muted);
+    opacity: 0.6;
 }
 
 /* Workflow Task Details */
@@ -1480,6 +1576,9 @@ HTML_HEAD = """<!DOCTYPE html>
 
 HTML_FOOTER = """
     <a href="#top" id="back-to-top" class="back-to-top" title="Back to top">&#8593;</a>
+    <footer class="app-footer">
+        <span class="version-info">Therefore Config Processor v{app_version}</span>
+    </footer>
     <script>
 {javascript}
     </script>
@@ -1547,7 +1646,11 @@ OVERVIEW_TEMPLATE = """
         {stats_cards}
     </div>
 
+    {version_warning_section}
+
     {validation_section}
+
+    {root_security_section}
 
     <div class="card">
         <div class="card-header">
@@ -1764,12 +1867,14 @@ FOLDER_TREE_TEMPLATE = """
 """
 
 FOLDER_ITEM_TEMPLATE = """
-<div class="tree-item">
+<div class="tree-item{security_class}">
     <div class="tree-item-label">
         <span class="icon">&#128193;</span>
         {name}
         <span class="badge">{type}</span>
+        {security_badges}
     </div>
+    {security_details}
     {children}
 </div>
 """
