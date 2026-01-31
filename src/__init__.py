@@ -1,6 +1,6 @@
 """Therefore Configuration Processor - Generate HTML documentation from Therefore configuration exports."""
 
-__version__ = "1.2.0"
+__version__ = "1.3.0"
 
 # Maximum supported Therefore configuration schema version
 # This is the <Version> value from the Configuration XML export
