@@ -742,7 +742,14 @@ class HTMLGenerator:
         fields_html = ""
         if category.fields:
             field_rows = []
+            label_field_count = 0
+
             for fld in category.fields:
+                # Check if this is a label field
+                is_label_field = fld.type_no == 4
+                if is_label_field:
+                    label_field_count += 1
+
                 type_display = escape_html(fld.type_name)
                 if fld.type_no < 0:
                     dictionary = self.config.get_dictionary_by_type_no(fld.type_no)
@@ -755,29 +762,45 @@ class HTMLGenerator:
                             dt_slug = slugify(datatype.name) or str(abs(datatype.datatype_no))
                             type_display = f'<a href="#datatype-{dt_slug}">{escape_html(datatype.name)}</a>'
 
+                row_class = "label-field" if is_label_field else ""
                 field_rows.append(f'''
-                    <tr>
+                    <tr class="{row_class}">
                         <td>{escape_html(fld.caption)}</td>
                         <td><code>{escape_html(fld.field_id or fld.col_name or "")}</code></td>
-                        <td>{type_display}</td>
+                        <td><span class="badge">{type_display}</span></td>
                         <td>{"Yes" if fld.is_mandatory else "No"}</td>
+                        <td>{abs(fld.field_no)}</td>
                     </tr>
                 ''')
 
+            # Generate toggle button if there are label fields
+            label_toggle = ""
+            if label_field_count > 0:
+                label_toggle = f'<span class="label-toggle">Show Label Fields ({label_field_count})</span>'
+
             fields_html = f'''
-                <table class="compact-table">
-                    <thead>
-                        <tr>
-                            <th>Caption</th>
-                            <th>Field ID</th>
-                            <th>Type</th>
-                            <th>Required</th>
-                        </tr>
-                    </thead>
-                    <tbody>
-                        {''.join(field_rows)}
-                    </tbody>
-                </table>
+                <div class="fields-list">
+                    <div class="fields-header">
+                        <h4>Fields ({len(category.fields)})</h4>
+                        {label_toggle}
+                    </div>
+                    <div class="table-responsive">
+                        <table>
+                            <thead>
+                                <tr>
+                                    <th>Caption</th>
+                                    <th>Field ID</th>
+                                    <th>Type</th>
+                                    <th>Required</th>
+                                    <th>Field No</th>
+                                </tr>
+                            </thead>
+                            <tbody>
+                                {''.join(field_rows)}
+                            </tbody>
+                        </table>
+                    </div>
+                </div>
             '''
 
         # Security section for the category
@@ -790,6 +813,7 @@ class HTMLGenerator:
                 <strong>{escape_html(category.name)}</strong>
                 <span class="field-count">({len(category.fields)} fields)</span>
                 {' '.join(badges)}
+                <span class="category-no">Category No: {abs(category.category_no)}</span>
             </div>
             <div class="nested-item-body">
                 {fields_html}

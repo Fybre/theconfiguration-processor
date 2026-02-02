@@ -706,6 +706,12 @@ tr:hover {
     font-size: 0.875rem;
 }
 
+.nested-item-header .category-no {
+    color: var(--text-muted);
+    font-size: 0.75rem;
+    margin-left: auto;
+}
+
 .compact-table {
     width: 100%;
     font-size: 0.875rem;

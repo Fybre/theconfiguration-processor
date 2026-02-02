@@ -4,6 +4,7 @@ import argparse
 import sys
 from pathlib import Path
 
+from . import __version__
 from .parser import ConfigurationParser
 from .generator import HTMLGenerator
 
@@ -47,7 +48,7 @@ def main(args=None):
     parser.add_argument(
         "--version",
         action="version",
-        version="%(prog)s 1.0.0"
+        version=f"%(prog)s {__version__}"
     )
 
     parsed_args = parser.parse_args(args)
