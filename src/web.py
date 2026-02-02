@@ -237,6 +237,7 @@ UPLOAD_PAGE = """
                 <div class="upload-icon">📄</div>
                 <p class="upload-text">Drop your XML file here or click to browse</p>
                 <p class="upload-hint">TheConfiguration.xml export from Therefore</p>
+                <p class="upload-hint">Remember to export Role Assignments for full security information</p>
             </div>
             <input type="file" name="file" id="fileInput" accept=".xml">
 

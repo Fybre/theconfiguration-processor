@@ -521,6 +521,21 @@ tr:hover {
     color: #dc2626;
 }
 
+.badge-logic {
+    background: #e0e7ff;
+    color: #4338ca;
+}
+
+.badge-info {
+    background: #cffafe;
+    color: #0891b2;
+}
+
+.badge-secondary {
+    background: #e5e7eb;
+    color: #4b5563;
+}
+
 /* Section */
 .section {
     margin-bottom: 3rem;
@@ -734,6 +749,43 @@ tr:hover {
     margin-top: 1rem;
 }
 
+.fields-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    margin-bottom: 0.75rem;
+}
+
+.fields-header h4 {
+    font-size: 0.875rem;
+    margin: 0;
+    color: var(--text-muted);
+}
+
+.label-toggle {
+    font-size: 0.75rem;
+    cursor: pointer;
+    color: var(--primary-color);
+    padding: 0.25rem 0.5rem;
+    border: 1px solid var(--primary-color);
+    border-radius: 4px;
+    transition: background-color 0.2s, color 0.2s;
+}
+
+.label-toggle:hover {
+    background: var(--primary-color);
+    color: white;
+}
+
+.fields-list.show-labels .label-toggle {
+    background: var(--primary-color);
+    color: white;
+}
+
+.fields-list:not(.show-labels) tr.label-field {
+    display: none;
+}
+
 .fields-list h4 {
     font-size: 0.875rem;
     margin-bottom: 0.75rem;
@@ -758,6 +810,26 @@ tr:hover {
 .field-item .field-type {
     color: var(--text-muted);
     margin-left: auto;
+}
+
+/* Keywords Table */
+.keywords-table {
+    margin-top: 1rem;
+}
+
+.keywords-table h4 {
+    font-size: 0.875rem;
+    color: var(--text-muted);
+    margin-bottom: 0.5rem;
+}
+
+.keywords-table table {
+    font-size: 0.8125rem;
+}
+
+.keywords-table td:first-child {
+    width: 80px;
+    color: var(--text-muted);
 }
 
 /* Workflow Diagram */
@@ -1223,6 +1295,42 @@ a:hover {
     margin-bottom: 0.25rem;
 }
 
+/* Logic rule styles */
+.logic-rule {
+    background: var(--bg-color);
+    border: 1px solid var(--border-color);
+    border-radius: 4px;
+    padding: 0.75rem;
+    margin-top: 0.5rem;
+}
+
+.logic-rule-header {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+    margin-bottom: 0.5rem;
+}
+
+.logic-actions {
+    display: flex;
+    flex-direction: column;
+    gap: 0.5rem;
+}
+
+.logic-action {
+    background: #f8fafc;
+    border: 1px solid var(--border-color);
+    border-radius: 4px;
+    padding: 0.5rem;
+}
+
+.logic-action-header {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+    margin-bottom: 0.25rem;
+}
+
 .eform-components-summary {
     display: flex;
     flex-wrap: wrap;
@@ -1557,6 +1665,18 @@ document.addEventListener('DOMContentLoaded', function() {
             });
         });
     });
+
+    // Label field toggle
+    document.querySelectorAll('.label-toggle').forEach(toggle => {
+        toggle.addEventListener('click', function() {
+            const fieldsList = this.closest('.fields-list');
+            fieldsList.classList.toggle('show-labels');
+            const count = this.textContent.match(/\d+/)[0];
+            this.textContent = fieldsList.classList.contains('show-labels')
+                ? 'Hide Label Fields (' + count + ')'
+                : 'Show Label Fields (' + count + ')';
+        });
+    });
 });
 """
 
@@ -1699,6 +1819,7 @@ CATEGORY_TEMPLATE = """
         <span class="expand-icon">&#9660;</span>
         <h3>{name}</h3>
         {badges}
+        <span class="id">Category No: {category_no}</span>
         <span class="id">{guid}</span>
     </div>
     <div class="item-detail-body">
@@ -1737,7 +1858,10 @@ CATEGORY_TEMPLATE = """
 
 FIELDS_TABLE_TEMPLATE = """
 <div class="fields-list">
-    <h4>Fields ({count})</h4>
+    <div class="fields-header">
+        <h4>Fields ({count})</h4>
+        {label_toggle}
+    </div>
     <div class="table-responsive">
         <table>
             <thead>
@@ -1748,6 +1872,7 @@ FIELDS_TABLE_TEMPLATE = """
                     <th>Length</th>
                     <th>Index</th>
                     <th>Mandatory</th>
+                    <th>Field No</th>
                 </tr>
             </thead>
             <tbody>
@@ -1759,13 +1884,14 @@ FIELDS_TABLE_TEMPLATE = """
 """
 
 FIELD_ROW_TEMPLATE = """
-<tr>
+<tr class="{row_class}">
     <td>{caption}</td>
     <td><code>{field_id}</code></td>
     <td><span class="badge">{type_name}</span></td>
     <td>{length}</td>
     <td>{index_type}</td>
     <td>{mandatory}</td>
+    <td>{field_no}</td>
 </tr>
 """
 

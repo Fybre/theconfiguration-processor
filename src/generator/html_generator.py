@@ -396,7 +396,14 @@ class HTMLGenerator:
         fields_section = ""
         if category.fields:
             field_rows = []
+            label_field_count = 0
+
             for fld in category.fields:
+                # Check if this is a label field (type_no == 4)
+                is_label_field = fld.type_no == 4
+                if is_label_field:
+                    label_field_count += 1
+
                 # Get type name, with dictionary/datatype link if applicable
                 type_display = escape_html(fld.type_name)
 
@@ -416,17 +423,25 @@ class HTMLGenerator:
                             type_display = f"Reference ({fld.type_no})"
 
                 field_rows.append(FIELD_ROW_TEMPLATE.format(
+                    field_no=abs(fld.field_no),
                     caption=escape_html(fld.caption),
                     field_id=escape_html(fld.field_id or fld.col_name or ""),
                     type_name=type_display,
                     length=fld.length if fld.length > 0 else "-",
                     index_type=escape_html(fld.index_type_name) if fld.index_type > 0 else "-",
-                    mandatory="Yes" if fld.is_mandatory else "No"
+                    mandatory="Yes" if fld.is_mandatory else "No",
+                    row_class="label-field" if is_label_field else ""
                 ))
+
+            # Generate toggle button if there are label fields
+            label_toggle = ""
+            if label_field_count > 0:
+                label_toggle = f'<span class="label-toggle">Show Label Fields ({label_field_count})</span>'
 
             fields_section = FIELDS_TABLE_TEMPLATE.format(
                 count=len(category.fields),
-                rows='\n'.join(field_rows)
+                rows='\n'.join(field_rows),
+                label_toggle=label_toggle
             )
 
         folder_path = self.config.get_folder_path(category.folder_no) if category.folder_no else "-"
@@ -440,6 +455,7 @@ class HTMLGenerator:
         return CATEGORY_TEMPLATE.format(
             id=slugify(category.name) or str(abs(category.category_no)),
             name=escape_html(category.name),
+            category_no=abs(category.category_no),
             badges=' '.join(badges),
             guid=escape_html(category.id or ""),
             title=escape_html(category.title or category.name),
@@ -625,7 +641,14 @@ class HTMLGenerator:
         fields_section = ""
         if case_def.fields:
             field_rows = []
+            label_field_count = 0
+
             for fld in case_def.fields:
+                # Check if this is a label field (type_no == 4)
+                is_label_field = fld.type_no == 4
+                if is_label_field:
+                    label_field_count += 1
+
                 # Get type name, with dictionary/datatype link if applicable
                 type_display = escape_html(fld.type_name)
                 if fld.type_no < 0:
@@ -645,17 +668,25 @@ class HTMLGenerator:
                 mandatory = '<span class="badge badge-danger" title="Required">*</span>' if fld.is_mandatory else ''
 
                 field_rows.append(FIELD_ROW_TEMPLATE.format(
+                    field_no=abs(fld.field_no),
                     caption=escape_html(fld.caption),
                     field_id=escape_html(fld.field_id or fld.col_name or ''),
                     type_name=type_display,
                     length=fld.length or '-',
                     index_type=escape_html(fld.index_type_name) if fld.index_type_name else '-',
-                    mandatory=mandatory
+                    mandatory=mandatory,
+                    row_class="label-field" if is_label_field else ""
                 ))
+
+            # Generate toggle button if there are label fields
+            label_toggle = ""
+            if label_field_count > 0:
+                label_toggle = f'<span class="label-toggle">Show Label Fields ({label_field_count})</span>'
 
             fields_section = FIELDS_TABLE_TEMPLATE.format(
                 count=len(case_def.fields),
-                rows=''.join(field_rows)
+                rows=''.join(field_rows),
+                label_toggle=label_toggle
             )
 
         # Find categories that belong to this case definition and render them as expandable items
@@ -1515,6 +1546,7 @@ class HTMLGenerator:
                 comp.validate_custom or
                 comp.custom_conditional
             )
+            has_logic = bool(comp.logic)
             has_data = bool(comp.default_value or comp.data_source or comp.validate_required)
 
             # Build component body content
@@ -1585,11 +1617,66 @@ class HTMLGenerator:
 
             # Logic rules
             if comp.logic:
-                logic_summary = f'{len(comp.logic)} logic rule(s)'
+                logic_html_parts = []
+                for logic_rule in comp.logic:
+                    if not isinstance(logic_rule, dict):
+                        continue
+
+                    rule_name = logic_rule.get("name", "Unnamed")
+                    trigger = logic_rule.get("trigger", {})
+                    trigger_type = trigger.get("type", "unknown") if isinstance(trigger, dict) else "unknown"
+
+                    # Get trigger code based on type
+                    trigger_code = ""
+                    if isinstance(trigger, dict):
+                        if trigger_type == "javascript":
+                            trigger_code = trigger.get("javascript", "")
+                        elif trigger_type == "simple":
+                            trigger_code = f"when: {trigger.get('when', '')} = {trigger.get('eq', '')}"
+                        elif trigger_type == "json":
+                            trigger_code = trigger.get("json", "")
+                        elif trigger_type == "event":
+                            trigger_code = trigger.get("event", "")
+
+                    # Build actions list
+                    actions = logic_rule.get("actions", [])
+                    actions_html = ""
+                    if actions:
+                        action_items = []
+                        for action in actions:
+                            if not isinstance(action, dict):
+                                continue
+                            action_name = action.get("name", "Unnamed")
+                            action_type = action.get("type", "unknown")
+                            action_value = action.get("value", "")
+
+                            action_items.append(f'''
+                            <div class="logic-action">
+                                <span class="logic-action-header">
+                                    <strong>{escape_html(action_name)}</strong>
+                                    <span class="badge badge-info">{escape_html(action_type)}</span>
+                                </span>
+                                {f'<div class="script-block">{escape_html(str(action_value))}</div>' if action_value else ''}
+                            </div>
+                            ''')
+                        if action_items:
+                            actions_html = f'<div class="logic-actions">{"".join(action_items)}</div>'
+
+                    logic_html_parts.append(f'''
+                    <div class="logic-rule">
+                        <div class="logic-rule-header">
+                            <strong>{escape_html(rule_name)}</strong>
+                            <span class="badge badge-secondary">trigger: {escape_html(trigger_type)}</span>
+                        </div>
+                        {f'<div class="eform-script-section"><div class="eform-script-label">Trigger</div><div class="script-block">{escape_html(trigger_code)}</div></div>' if trigger_code else ''}
+                        {f'<div class="eform-script-section"><div class="eform-script-label">Actions</div>{actions_html}</div>' if actions_html else ''}
+                    </div>
+                    ''')
+
                 body_parts.append(f'''
                 <div class="eform-script-section">
-                    <div class="eform-script-label">Logic Rules</div>
-                    <span class="badge">{logic_summary}</span>
+                    <div class="eform-script-label">Logic Rules ({len(comp.logic)})</div>
+                    {''.join(logic_html_parts)}
                 </div>
                 ''')
 
@@ -1621,7 +1708,7 @@ class HTMLGenerator:
             }.get(comp.type, '')
 
             # Render component
-            collapsed_class = "collapsed" if not has_scripts and level == 0 else ""
+            collapsed_class = "collapsed" if not has_scripts and not has_logic and level == 0 else ""
             label_display = escape_html(comp.label) if comp.label else f'<em>(no label)</em>'
 
             html_parts.append(f'''
@@ -1632,6 +1719,7 @@ class HTMLGenerator:
                     <span>{label_display}</span>
                     <span class="badge badge-{type_class} component-type">{escape_html(comp.type)}</span>
                     {' <span class="badge badge-warning">Script</span>' if has_scripts else ''}
+                    {' <span class="badge badge-logic">Logic</span>' if has_logic else ''}
                 </div>
                 <div class="eform-component-body">
                     {body_content if body_content else '<em>No additional configuration</em>'}
@@ -1682,17 +1770,37 @@ class HTMLGenerator:
         for dictionary in self.config.keyword_dictionaries:
             folder_path = self.config.get_folder_path(dictionary.folder_no) if dictionary.folder_no else "-"
 
-            # Keywords section
+            # Keywords section - display as table with KeywordNo and value
             keywords_section = ""
             if dictionary.keywords:
-                keyword_list = ', '.join([escape_html(kw.value) for kw in dictionary.keywords[:20]])
-                if len(dictionary.keywords) > 20:
-                    keyword_list += f' ... and {len(dictionary.keywords) - 20} more'
+                keyword_rows = []
+                for kw in dictionary.keywords[:50]:
+                    keyword_rows.append(f'''
+                        <tr>
+                            <td>{kw.keyword_no}</td>
+                            <td>{escape_html(kw.value)}</td>
+                        </tr>''')
+
+                remaining = len(dictionary.keywords) - 50
+                remaining_note = f'<p class="text-muted" style="font-size: 0.75rem; margin-top: 0.5rem;">...and {remaining} more</p>' if remaining > 0 else ''
 
                 keywords_section = f'''
-                <div class="fields-list">
-                    <h4>Keywords</h4>
-                    <p style="font-size: 0.875rem; color: var(--text-muted);">{keyword_list}</p>
+                <div class="keywords-table">
+                    <h4>Keywords ({len(dictionary.keywords)})</h4>
+                    <div class="table-responsive">
+                        <table>
+                            <thead>
+                                <tr>
+                                    <th>No</th>
+                                    <th>Keyword</th>
+                                </tr>
+                            </thead>
+                            <tbody>
+                                {''.join(keyword_rows)}
+                            </tbody>
+                        </table>
+                    </div>
+                    {remaining_note}
                 </div>
                 '''
 
