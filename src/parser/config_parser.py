@@ -532,10 +532,8 @@ class ConfigurationParser:
         from .models import RestServiceCall
         rest_calls = []
         try:
-            import html
-            # Unescape HTML entities in params
-            unescaped = html.unescape(params)
-            params_root = ET.fromstring(unescaped)
+            # Parse params as XML directly (they're already properly escaped)
+            params_root = ET.fromstring(params)
 
             # Find all call elements
             call_elems = params_root.findall('.//calls/Elem')
