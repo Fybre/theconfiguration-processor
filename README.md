@@ -14,11 +14,14 @@ The Therefore Configuration Processor generates comprehensive, interactive HTML 
 - **Volume Mapping**: Output files are available on your host system (Docker mode)
 
 ### 🤖 AI-Powered Summaries
-- **Local LLM Integration**: Generate human-readable summaries using local LLMs (Ollama, LM Studio, LocalAI)
+- **Local LLM Integration**: Generate human-readable summaries using local LLMs (Ollama, LM Studio, LocalAI, Azure OpenAI)
+- **Multi-LLM Fallback**: Configure multiple LLM providers with automatic fallback on failure
 - **Parallel Generation**: Process multiple summaries concurrently for faster results
 - **Real-Time Progress**: Live progress bar with Server-Sent Events showing generation status
+- **Intelligent Caching**: Cache summaries based on configuration hash for instant reuse
 - **Comprehensive Coverage**: AI summaries for system overview, categories, workflows, and roles
-- **Privacy-First**: All AI processing happens locally - no external API calls
+- **Privacy-First**: All AI processing happens locally - no external API calls (except Azure if configured)
+- **Async Processing**: Background processing compatible with Cloudflare tunnels and proxy timeouts
 
 ### 🔒 Security Audit Report
 - **Permission Conflict Detection**: Identify objects with both allow and deny permissions
@@ -32,6 +35,7 @@ The Therefore Configuration Processor generates comprehensive, interactive HTML 
 - **Click-to-Expand**: Click any workflow diagram to view full-size in an overlay
 - **Pan & Zoom Controls**: Interactive controls with mouse wheel zoom, click-drag pan
 - **Mermaid Visualization**: Flowchart-based workflow process diagrams
+- **REST Service Details**: Detailed display of REST API calls including endpoints, methods, body parameters, and response scripts
 - **Usage Instructions**: Built-in header with keyboard shortcuts and interaction guide
 
 ## Project Structure
@@ -151,9 +155,9 @@ python -m src.web
 1. Upload Therefore configuration XML files (drag-and-drop or click to browse)
 2. Enable AI summaries (optional):
    - Check "Generate AI Summaries"
-   - Configure LLM endpoint (default: http://localhost:11434/v1)
-   - Set model name (default: llama3.2)
-   - Click "Test Connection" to verify
+   - AI configuration automatically detected from environment variables
+   - System shows which LLM providers are online
+   - Click "Clear AI Cache" to regenerate summaries for updated configurations
 3. View real-time progress during AI generation
 4. Preview and download generated HTML documentation
 5. Compare two configurations side-by-side
@@ -188,25 +192,43 @@ python -m src.main --gui
 Create a `.env` file in the project root (optional):
 
 ```bash
-# LLM Configuration
-LLM_BASE_URL=http://localhost:11434/v1
-LLM_MODEL_NAME=llama3.2
+# LLM Configuration (Single LLM)
+LLM_1_BASE_URL=http://localhost:11434/v1
+LLM_1_MODEL_NAME=llama3.2
+LLM_1_API_KEY=not-needed
+
+# Multi-LLM Configuration with Fallback (Optional)
+# LLM_2_BASE_URL=http://localhost:1234/v1
+# LLM_2_MODEL_NAME=llama-3.1-8b
+# LLM_2_API_KEY=not-needed
+
+# Azure OpenAI Example (Optional)
+# LLM_3_BASE_URL=https://your-resource.openai.azure.com/openai/deployments/gpt-4/chat/completions?api-version=2024-02-15-preview
+# LLM_3_MODEL_NAME=gpt-4
+# LLM_3_API_KEY=your-api-key
+
+# LLM Settings
+LLM_TEMPERATURE=0.4
 LLM_TIMEOUT=60
 
 # Flask Configuration
 FLASK_DEBUG=True
 FLASK_PORT=5050
+FLASK_SECRET_KEY=your-secret-key-here
 ```
 
 ### LLM Configuration
 
-The AI summary feature supports any OpenAI-compatible API:
+The AI summary feature supports any OpenAI-compatible API with multi-provider fallback:
 
 | Provider | Default URL | Notes |
 |----------|-------------|-------|
-| Ollama | http://localhost:11434/v1 | Recommended for local use |
+| Ollama | http://localhost:11434/v1 | Recommended for local use, fastest setup |
 | LM Studio | http://localhost:1234/v1 | GUI-based model management |
 | LocalAI | http://localhost:8080/v1 | Self-hosted alternative |
+| Azure OpenAI | https://your-resource.openai.azure.com/... | Enterprise cloud option (requires API key) |
+
+**Multi-LLM Setup**: Configure multiple LLMs (LLM_1_, LLM_2_, LLM_3_, etc.) for automatic fallback if primary LLM is unavailable. The system will try each configured LLM in order until one succeeds.
 
 ## Generated Documentation Features
 
@@ -216,6 +238,7 @@ The generated HTML includes:
 - **System Overview**: Configuration statistics, version info, metadata
 - **Categories**: Document types with fields, permissions, and workflows
 - **Workflows**: Task flows with transitions, conditions, and routing
+  - REST service call details: Endpoints, HTTP methods, body parameters, response scripts
 - **Roles**: Permission assignments and access control
 - **Folders**: Document organization structure
 - **Dictionaries**: Keyword lists and lookup tables
@@ -336,6 +359,12 @@ FLASK_PORT=5051 python -m src.web
 - Disable AI summaries for initial processing
 - Increase Python memory limit if needed
 - Process in CLI mode instead of web interface
+
+**Cloudflare tunnel timeouts:**
+- Web interface uses async processing (< 1 second response time)
+- Processing continues in background after upload completes
+- Real-time progress updates via Server-Sent Events
+- No need to adjust cloudflared timeout settings
 
 ### View Logs
 
