@@ -7,4 +7,5 @@ services:
     volumes:
       - ./samples:/app/samples:ro
       - ./output:/app/output
+      - ./.env:/app/.env:ro
     restart: unless-stopped

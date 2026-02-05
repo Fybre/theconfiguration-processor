@@ -13,9 +13,9 @@ WORKDIR /app
 # Copy project files
 COPY . .
 
-# Install the package in development mode and curl for health checks
+# Install the package with AI features and curl for health checks
 RUN apt-get update && apt-get install -y curl && \
-    pip install --no-cache-dir -e ".[web]"
+    pip install --no-cache-dir -e ".[webai]"
 
 # Create output directory
 RUN mkdir -p /app/output
