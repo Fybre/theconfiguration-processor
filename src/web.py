@@ -692,13 +692,40 @@ UPLOAD_PAGE = """
                             progressBar.textContent = '100%';
                             progressStatus.textContent = 'Complete! Downloading...';
 
-                            // Download the result
-                            window.location.href = `/job-result/${jobId}`;
+                            // Download the result using fetch and blob
+                            try {
+                                const resultResponse = await fetch(`/job-result/${jobId}`);
+                                const blob = await resultResponse.blob();
+                                const filename = resultResponse.headers.get('Content-Disposition')
+                                    ?.split('filename=')[1]
+                                    ?.replace(/"/g, '') || 'documentation.html';
 
-                            // Close overlay after a moment
-                            setTimeout(() => {
-                                progressOverlay.classList.remove('active');
-                            }, 2000);
+                                // Create download link and trigger it
+                                const url = window.URL.createObjectURL(blob);
+                                const a = document.createElement('a');
+                                a.style.display = 'none';
+                                a.href = url;
+                                a.download = filename;
+                                document.body.appendChild(a);
+                                a.click();
+                                window.URL.revokeObjectURL(url);
+                                document.body.removeChild(a);
+
+                                progressStatus.textContent = 'Download complete!';
+
+                                // Close overlay and reload page
+                                setTimeout(() => {
+                                    progressOverlay.classList.remove('active');
+                                    window.location.reload();
+                                }, 2000);
+                            } catch (error) {
+                                console.error('Download error:', error);
+                                progressStatus.textContent = 'Download failed. Refreshing page...';
+                                setTimeout(() => {
+                                    progressOverlay.classList.remove('active');
+                                    window.location.reload();
+                                }, 2000);
+                            }
 
                         } else if (status.status === 'failed') {
                             clearInterval(pollInterval);
