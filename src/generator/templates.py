@@ -1813,7 +1813,7 @@ document.addEventListener('DOMContentLoaded', function() {
         toggle.addEventListener('click', function() {
             const fieldsList = this.closest('.fields-list');
             fieldsList.classList.toggle('show-labels');
-            const count = this.textContent.match(/\d+/)[0];
+            const count = this.textContent.match(/\\d+/)[0];
             this.textContent = fieldsList.classList.contains('show-labels')
                 ? 'Hide Label Fields (' + count + ')'
                 : 'Show Label Fields (' + count + ')';
