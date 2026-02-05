@@ -8,6 +8,8 @@ import uuid
 import json
 import threading
 from pathlib import Path
+from datetime import datetime
+from typing import Dict, Optional
 from . import __version__
 from .parser.config_parser import ConfigurationParser
 from .generator.html_generator import HTMLGenerator
@@ -56,6 +58,76 @@ for i in range(1, 10):  # Support up to 9 LLMs
             print(f"Loaded LLM config #{i}: {base_url}")
 
 AI_CONFIGURED = bool(LLM_CONFIGS and AI_AVAILABLE)
+
+
+# Job manager for async processing
+class JobManager:
+    """Manages background processing jobs."""
+
+    def __init__(self):
+        self._jobs: Dict[str, dict] = {}
+        self._lock = threading.Lock()
+
+    def create_job(self, job_id: str) -> None:
+        """Create a new job."""
+        with self._lock:
+            self._jobs[job_id] = {
+                'status': 'processing',
+                'progress': 0,
+                'total': 0,
+                'current': '',
+                'result': None,
+                'error': None,
+                'created_at': datetime.now(),
+                'filename': None
+            }
+
+    def update_progress(self, job_id: str, completed: int, total: int, current: str) -> None:
+        """Update job progress."""
+        with self._lock:
+            if job_id in self._jobs:
+                self._jobs[job_id].update({
+                    'progress': completed,
+                    'total': total,
+                    'current': current
+                })
+
+    def complete_job(self, job_id: str, result: bytes, filename: str) -> None:
+        """Mark job as completed."""
+        with self._lock:
+            if job_id in self._jobs:
+                self._jobs[job_id].update({
+                    'status': 'completed',
+                    'result': result,
+                    'filename': filename
+                })
+
+    def fail_job(self, job_id: str, error: str) -> None:
+        """Mark job as failed."""
+        with self._lock:
+            if job_id in self._jobs:
+                self._jobs[job_id].update({
+                    'status': 'failed',
+                    'error': error
+                })
+
+    def get_job(self, job_id: str) -> Optional[dict]:
+        """Get job status."""
+        with self._lock:
+            return self._jobs.get(job_id)
+
+    def cleanup_old_jobs(self, max_age_hours: int = 24) -> None:
+        """Remove jobs older than specified hours."""
+        from datetime import timedelta
+        with self._lock:
+            cutoff = datetime.now() - timedelta(hours=max_age_hours)
+            self._jobs = {
+                jid: job for jid, job in self._jobs.items()
+                if job['created_at'] > cutoff
+            }
+
+
+job_manager = JobManager()
 
 app = Flask(__name__)
 
@@ -527,18 +599,17 @@ UPLOAD_PAGE = """
         }
 
         generateForm.addEventListener('submit', (e) => {
+            // Always prevent default and use async processing
+            e.preventDefault();
+
             const aiEnabled = document.getElementById('withAI')?.checked;
 
             if (aiEnabled) {
-                // Prevent default form submission
-                e.preventDefault();
-                // Show progress overlay and submit via fetch
+                // Show progress overlay for AI generation
                 showProgressOverlay();
             } else {
-                // Normal loading for non-AI generation
-                btnText.style.display = 'none';
-                loading.classList.add('active');
-                submitBtn.disabled = true;
+                // Show progress overlay for non-AI generation too
+                showProgressOverlay();
             }
         });
 
@@ -553,7 +624,7 @@ UPLOAD_PAGE = """
 
             // Show progress overlay
             progressOverlay.classList.add('active');
-            progressStatus.textContent = 'Initializing progress tracker...';
+            progressStatus.textContent = 'Starting processing...';
             progressCurrentItem.textContent = '';
             progressBar.style.width = '0%';
             progressBar.textContent = '0%';
@@ -562,24 +633,38 @@ UPLOAD_PAGE = """
                 // Create tracker on server first
                 await fetch(`/create-tracker/${trackerId}`, { method: 'POST' });
 
-                progressStatus.textContent = 'Connecting to progress stream...';
+                // Submit form
+                const formData = new FormData(generateForm);
+                formData.append('tracker_id', trackerId);
 
-                // Now connect to SSE for progress updates
+                progressStatus.textContent = 'Uploading file...';
+
+                const uploadResponse = await fetch('/', {
+                    method: 'POST',
+                    body: formData
+                });
+
+                const uploadResult = await uploadResponse.json();
+
+                if (!uploadResult.success) {
+                    throw new Error(uploadResult.message || 'Upload failed');
+                }
+
+                const jobId = uploadResult.job_id;
+                progressStatus.textContent = 'Processing started...';
+
+                // Connect to SSE for progress updates
                 const eventSource = new EventSource(`/ai-progress/${trackerId}`);
 
                 eventSource.onmessage = (event) => {
                     const data = JSON.parse(event.data);
 
                     if (data.connected) {
-                        progressStatus.textContent = 'Connected! Starting generation...';
                         return;
                     }
 
                     if (data.done) {
                         eventSource.close();
-                        progressStatus.textContent = 'Complete! Redirecting...';
-                        progressBar.style.width = '100%';
-                        progressBar.textContent = '100%';
                     } else {
                         const percent = Math.round((data.completed / data.total) * 100);
                         progressBar.style.width = percent + '%';
@@ -594,33 +679,42 @@ UPLOAD_PAGE = """
                     eventSource.close();
                 };
 
-                // Submit form via fetch (keeps page active for SSE)
-                setTimeout(() => {
-                    const formData = new FormData(generateForm);
-                    formData.append('tracker_id', trackerId);
+                // Poll for job completion
+                const pollInterval = setInterval(async () => {
+                    try {
+                        const statusResponse = await fetch(`/job-status/${jobId}`);
+                        const status = await statusResponse.json();
 
-                    fetch('/', {
-                        method: 'POST',
-                        body: formData
-                    })
-                    .then(response => response.text())
-                    .then(html => {
-                        // Replace entire document with response
-                        document.open();
-                        document.write(html);
-                        document.close();
-                    })
-                    .catch(error => {
-                        console.error('Error:', error);
-                        progressOverlay.classList.remove('active');
-                        alert('Error uploading file. Please try again.');
-                    });
-                }, 500); // Wait for SSE to be ready
+                        if (status.status === 'completed') {
+                            clearInterval(pollInterval);
+                            eventSource.close();
+                            progressBar.style.width = '100%';
+                            progressBar.textContent = '100%';
+                            progressStatus.textContent = 'Complete! Downloading...';
+
+                            // Download the result
+                            window.location.href = `/job-result/${jobId}`;
+
+                            // Close overlay after a moment
+                            setTimeout(() => {
+                                progressOverlay.classList.remove('active');
+                            }, 2000);
+
+                        } else if (status.status === 'failed') {
+                            clearInterval(pollInterval);
+                            eventSource.close();
+                            progressOverlay.classList.remove('active');
+                            alert('Processing failed: ' + (status.error || 'Unknown error'));
+                        }
+                    } catch (error) {
+                        console.error('Status check error:', error);
+                    }
+                }, 1000); // Poll every second
 
             } catch (error) {
-                console.error('Error creating tracker:', error);
+                console.error('Error:', error);
                 progressOverlay.classList.remove('active');
-                alert('Error initializing progress tracker.');
+                alert('Error: ' + error.message);
             }
         }
 
@@ -1152,6 +1246,77 @@ def test_llm():
         return jsonify({'success': False, 'message': f'Error: {str(e)}'})
 
 
+def process_file_async(job_id: str, xml_content: str, filename: str, with_ai: bool, tracker_id: str):
+    """Process file in background thread."""
+    try:
+        # Parse the XML
+        parser = ConfigurationParser()
+        config = parser.parse_string(xml_content)
+
+        # Check if AI summaries are requested
+        ai_summaries = None
+        if with_ai and AI_CONFIGURED:
+            try:
+                ai_generator = AISummaryGenerator(LLM_CONFIGS)
+
+                # Try to load from cache first
+                ai_summaries = ai_generator.load_from_cache(xml_content)
+
+                if ai_summaries:
+                    print("  Skipping generation - using cached summaries")
+                else:
+                    # Cache miss - generate new summaries in parallel
+                    print("=" * 60)
+                    print(f"Generating AI summaries (parallel) with {len(LLM_CONFIGS)} configured LLM(s)")
+                    for i, llm_config in enumerate(LLM_CONFIGS, 1):
+                        provider = "Azure OpenAI" if "azure.com" in llm_config.base_url.lower() else \
+                                   "Ollama" if "11434" in llm_config.base_url else "Local LLM"
+                        print(f"  {i}. {provider} ({llm_config.model_name})")
+                    print("=" * 60)
+
+                    def progress_callback(completed, total, current):
+                        progress_tracker.update(tracker_id, completed, total, current)
+                        job_manager.update_progress(job_id, completed, total, current)
+                        print(f"  Progress: {completed}/{total} - {current}")
+
+                    # Use parallel generation
+                    ai_summaries = ai_generator.generate_all_summaries_parallel(
+                        config,
+                        progress_callback=progress_callback,
+                        max_workers=3
+                    )
+
+                    progress_tracker.mark_done(tracker_id)
+
+                    # Save to cache
+                    if ai_summaries:
+                        ai_generator.save_to_cache(xml_content, ai_summaries)
+
+                    print(f"✓ AI summary generation completed")
+            except Exception as e:
+                # Log error but continue without summaries
+                print(f"✗ AI summary generation failed: {e}")
+                if tracker_id:
+                    progress_tracker.mark_done(tracker_id)
+                ai_summaries = None
+
+        # Generate HTML
+        title = filename.replace('.xml', '').replace('_', ' ').title()
+        generator = HTMLGenerator(config, title=title, ai_summaries=ai_summaries)
+        html_content = generator.generate_string()
+
+        # Complete the job
+        result_bytes = html_content.encode('utf-8')
+        result_filename = filename.replace('.xml', '_documentation.html')
+        job_manager.complete_job(job_id, result_bytes, result_filename)
+
+    except Exception as e:
+        print(f"✗ Job {job_id} failed: {e}")
+        job_manager.fail_job(job_id, str(e))
+        if tracker_id:
+            progress_tracker.mark_done(tracker_id)
+
+
 @app.route('/', methods=['GET', 'POST'])
 def upload():
     """Handle file upload and display results."""
@@ -1170,91 +1335,36 @@ def upload():
                                         ai_configured=AI_CONFIGURED)
 
         try:
-            # Parse the XML
+            # Read XML content
             xml_content = file.read().decode('utf-8')
-            parser = ConfigurationParser()
-            config = parser.parse_string(xml_content)
 
-            # Check if AI summaries are requested
-            ai_summaries = None
-            tracker_id = request.form.get('tracker_id')  # Get tracker ID from form
-            if request.form.get('with_ai') == 'on' and AI_CONFIGURED:
-                try:
-                    ai_generator = AISummaryGenerator(LLM_CONFIGS)
+            # Create job ID
+            job_id = str(uuid.uuid4())
+            tracker_id = request.form.get('tracker_id') or job_id
+            with_ai = request.form.get('with_ai') == 'on'
 
-                    # Try to load from cache first
-                    ai_summaries = ai_generator.load_from_cache(xml_content)
+            # Create tracker if needed
+            if not request.form.get('tracker_id'):
+                progress_tracker.create_tracker(tracker_id)
 
-                    if ai_summaries:
-                        print("  Skipping generation - using cached summaries")
-                    else:
-                        # Cache miss - generate new summaries in parallel
-                        if not tracker_id:
-                            tracker_id = str(uuid.uuid4())
-                            progress_tracker.create_tracker(tracker_id)
-                        # Tracker already created by /create-tracker endpoint
+            # Create job
+            job_manager.create_job(job_id)
 
-                        print("=" * 60)
-                        print(f"Generating AI summaries (parallel) with {len(LLM_CONFIGS)} configured LLM(s)")
-                        for i, llm_config in enumerate(LLM_CONFIGS, 1):
-                            provider = "Azure OpenAI" if "azure.com" in llm_config.base_url.lower() else \
-                                       "Ollama" if "11434" in llm_config.base_url else "Local LLM"
-                            print(f"  {i}. {provider} ({llm_config.model_name})")
-                        print("=" * 60)
+            # Start processing in background
+            thread = threading.Thread(
+                target=process_file_async,
+                args=(job_id, xml_content, file.filename, with_ai, tracker_id)
+            )
+            thread.daemon = True
+            thread.start()
 
-                        def progress_callback(completed, total, current):
-                            progress_tracker.update(tracker_id, completed, total, current)
-                            print(f"  Progress: {completed}/{total} - {current}")
-
-                        # Use parallel generation
-                        ai_summaries = ai_generator.generate_all_summaries_parallel(
-                            config,
-                            progress_callback=progress_callback,
-                            max_workers=3
-                        )
-
-                        progress_tracker.mark_done(tracker_id)
-
-                        # Save to cache
-                        if ai_summaries:
-                            ai_generator.save_to_cache(xml_content, ai_summaries)
-
-                        print(f"✓ AI summary generation completed")
-                except Exception as e:
-                    # Log error but continue without summaries
-                    print(f"✗ AI summary generation failed: {e}")
-                    if tracker_id:
-                        progress_tracker.mark_done(tracker_id)
-                    ai_summaries = None
-
-            # Store tracker ID in session if progress was tracked
-            if tracker_id:
-                session['last_tracker_id'] = tracker_id
-
-            # Generate HTML
-            title = file.filename.replace('.xml', '').replace('_', ' ').title()
-            generator = HTMLGenerator(config, title=title, ai_summaries=ai_summaries)
-            html_content = generator.generate_string()
-
-            # Store in temp file and save ID in session
-            title = file.filename.replace('.xml', '')
-            file_id = save_html_to_temp(html_content, title)
-            session['generated_file_id'] = file_id
-
-            # Get stats for display
-            stats_dict = config.get_statistics()
-            stats = [
-                ("Categories", stats_dict.get("categories", 0)),
-                ("Fields", stats_dict.get("fields", 0)),
-                ("Workflows", stats_dict.get("workflows", 0)),
-                ("Tasks", stats_dict.get("workflow_tasks", 0)),
-                ("Folders", stats_dict.get("folders", 0)),
-                ("Roles", stats_dict.get("roles", 0)),
-                ("EForms", stats_dict.get("eforms", 0)),
-                ("Dictionaries", stats_dict.get("keyword_dictionaries", 0)),
-            ]
-
-            return render_template_string(RESULT_PAGE, title=title, stats=stats, version=__version__)
+            # Return immediately with job ID
+            return jsonify({
+                'success': True,
+                'job_id': job_id,
+                'tracker_id': tracker_id,
+                'message': 'Processing started'
+            })
 
         except Exception as e:
             return render_template_string(UPLOAD_PAGE, error=f"Error processing file: {str(e)}", version=__version__,
@@ -1262,6 +1372,45 @@ def upload():
 
     return render_template_string(UPLOAD_PAGE, error=None, version=__version__,
                                 ai_configured=AI_CONFIGURED)
+
+
+@app.route('/job-status/<job_id>', methods=['GET'])
+def job_status(job_id):
+    """Get job status."""
+    job = job_manager.get_job(job_id)
+    if not job:
+        return jsonify({'error': 'Job not found'}), 404
+
+    return jsonify({
+        'status': job['status'],
+        'progress': job['progress'],
+        'total': job['total'],
+        'current': job['current'],
+        'error': job['error']
+    })
+
+
+@app.route('/job-result/<job_id>', methods=['GET'])
+def job_result(job_id):
+    """Download job result."""
+    job = job_manager.get_job(job_id)
+    if not job:
+        return jsonify({'error': 'Job not found'}), 404
+
+    if job['status'] != 'completed':
+        return jsonify({'error': 'Job not completed'}), 400
+
+    if not job['result']:
+        return jsonify({'error': 'No result available'}), 404
+
+    # Return the HTML file
+    return Response(
+        job['result'],
+        mimetype='text/html',
+        headers={
+            'Content-Disposition': f'attachment; filename="{job["filename"]}"'
+        }
+    )
 
 
 @app.route('/compare', methods=['POST'])
