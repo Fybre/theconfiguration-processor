@@ -970,7 +970,7 @@ RESULT_PAGE = """
         {% endfor %}
     </div>
     <div class="iframe-container">
-        <iframe src="/preview" title="Documentation Preview"></iframe>
+        <iframe src="{% if job_id %}/job-preview/{{ job_id }}{% else %}/preview{% endif %}" title="Documentation Preview"></iframe>
     </div>
 </body>
 </html>
@@ -1446,6 +1446,20 @@ def job_result_page(job_id):
                                  stats=job.get('stats', []),
                                  version=__version__,
                                  job_id=job_id)
+
+
+@app.route('/job-preview/<job_id>', methods=['GET'])
+def job_preview(job_id):
+    """Preview job result HTML (for iframe)."""
+    job = job_manager.get_job(job_id)
+    if not job or job['status'] != 'completed' or not job['result']:
+        return "No documentation generated yet", 404
+
+    # Return the HTML for preview (not as download)
+    return Response(
+        job['result'],
+        mimetype='text/html'
+    )
 
 
 @app.route('/compare', methods=['POST'])
