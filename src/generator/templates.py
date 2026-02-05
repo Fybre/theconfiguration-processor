@@ -1218,6 +1218,58 @@ a:hover {
     margin-top: 0.5rem;
 }
 
+/* REST Service Call Styles */
+.rest-call-item {
+    background: var(--card-bg);
+    border: 1px solid var(--border-color);
+    border-radius: 6px;
+    padding: 0.75rem;
+    margin-bottom: 0.5rem;
+}
+
+.rest-call-header {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+    margin-bottom: 0.5rem;
+}
+
+.rest-call-details {
+    font-size: 0.85rem;
+    line-height: 1.6;
+}
+
+.rest-call-details .label {
+    font-weight: 600;
+    color: var(--text-muted);
+    font-size: 0.75rem;
+}
+
+.rest-params-list {
+    list-style: none;
+    padding-left: 1rem;
+    margin: 0.25rem 0;
+}
+
+.rest-params-list li {
+    padding: 0.25rem 0;
+    font-family: monospace;
+    font-size: 0.8rem;
+}
+
+.rest-doc-options {
+    font-size: 0.75rem;
+    color: var(--text-muted);
+    margin-top: 0.5rem;
+    padding: 0.5rem;
+    background: var(--bg-color);
+    border-radius: 4px;
+}
+
+.rest-script-preview {
+    margin-top: 0.5rem;
+}
+
 /* Checklist display */
 .checklist-items {
     list-style: none;

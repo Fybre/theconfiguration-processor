@@ -468,6 +468,9 @@ class ConfigurationParser:
         # Extract init script from params if present
         if task.params:
             task.init_script = self._extract_init_script(task.params)
+            # Extract REST calls if action type is call rest sequence
+            if task.action_type == 'callrestsequence':
+                task.rest_calls = self._extract_rest_calls(task.params)
 
         # Parse notification mail XML to extract subject and message
         if task.notification_mail:
@@ -523,6 +526,83 @@ class ConfigurationParser:
         except Exception:
             pass
         return ""
+
+    def _extract_rest_calls(self, params: str) -> List:
+        """Extract REST service call configurations from params."""
+        from .models import RestServiceCall
+        rest_calls = []
+        try:
+            import html
+            # Unescape HTML entities in params
+            unescaped = html.unescape(params)
+            params_root = ET.fromstring(unescaped)
+
+            # Find all call elements
+            call_elems = params_root.findall('.//calls/Elem')
+            for call_elem in call_elems:
+                call = RestServiceCall()
+
+                # Extract basic call info
+                call_name_elem = call_elem.find('CallName')
+                if call_name_elem is not None and call_name_elem.text:
+                    call.call_name = call_name_elem.text
+
+                call_id_elem = call_elem.find('CallId')
+                if call_id_elem is not None and call_id_elem.text:
+                    call.call_id = call_id_elem.text
+
+                verb_elem = call_elem.find('verb')
+                if verb_elem is not None and verb_elem.text:
+                    call.http_method = verb_elem.text
+
+                url_elem = call_elem.find('url')
+                if url_elem is not None and url_elem.text:
+                    call.url = url_elem.text
+
+                cred_elem = call_elem.find('CredentialNo')
+                if cred_elem is not None and cred_elem.text:
+                    call.credential_no = cred_elem.text
+
+                # Extract body parameters
+                body_elems = call_elem.findall('.//body/Elem')
+                for body_elem in body_elems:
+                    name_elem = body_elem.find('N')
+                    value_elem = body_elem.find('V')
+                    if name_elem is not None and value_elem is not None:
+                        call.body_params.append({
+                            'name': name_elem.text or '',
+                            'value': value_elem.text or ''
+                        })
+
+                # Extract response script (may be long, limit preview)
+                resp_script_elem = call_elem.find('RespScript')
+                if resp_script_elem is not None and resp_script_elem.text:
+                    call.response_script = resp_script_elem.text.strip()
+
+                # Extract document sending options
+                doc_to_send_elem = call_elem.find('DocToSend')
+                if doc_to_send_elem is not None and doc_to_send_elem.text:
+                    call.doc_to_send = doc_to_send_elem.text
+
+                to_pdf_elem = call_elem.find('ToPdf')
+                if to_pdf_elem is not None and to_pdf_elem.text == '1':
+                    call.to_pdf = True
+
+                part_file_elem = call_elem.find('PartNameFile')
+                if part_file_elem is not None and part_file_elem.text:
+                    call.part_name_file = part_file_elem.text
+
+                part_meta_elem = call_elem.find('PartNameMetadata')
+                if part_meta_elem is not None and part_meta_elem.text:
+                    call.part_name_metadata = part_meta_elem.text
+
+                rest_calls.append(call)
+
+        except Exception as e:
+            # If parsing fails, return empty list
+            pass
+
+        return rest_calls
 
     def _parse_notification_mail(self, mail_xml: str) -> tuple:
         """Parse notification mail XML to extract subject and message."""

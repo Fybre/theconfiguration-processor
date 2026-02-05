@@ -1193,6 +1193,66 @@ class HTMLGenerator:
             </div>
             '''
 
+        # REST service calls section if present
+        rest_calls_html = ""
+        if task.rest_calls:
+            rest_items = []
+            for call in task.rest_calls:
+                # Build body parameters list
+                body_params_html = ""
+                if call.body_params:
+                    params_list = ''.join([
+                        f'<li><code>{escape_html(p["name"])}</code> = {escape_html(p["value"])}</li>'
+                        for p in call.body_params
+                    ])
+                    body_params_html = f'<ul class="rest-params-list">{params_list}</ul>'
+
+                # Response script preview (limit to first 200 chars)
+                resp_script_html = ""
+                if call.response_script:
+                    script_preview = call.response_script[:200] + ('...' if len(call.response_script) > 200 else '')
+                    resp_script_html = f'''
+                    <div class="rest-script-preview">
+                        <div class="label" style="font-size: 0.7rem;">Response Script</div>
+                        <div class="script-block" style="font-size: 0.75rem;">{escape_html(script_preview)}</div>
+                    </div>
+                    '''
+
+                # Document sending options
+                doc_options = []
+                if call.doc_to_send:
+                    doc_options.append(f"Send Document: {escape_html(call.doc_to_send)}")
+                if call.to_pdf:
+                    doc_options.append("Convert to PDF")
+                if call.part_name_file:
+                    doc_options.append(f"File Part: {escape_html(call.part_name_file)}")
+                doc_options_html = ""
+                if doc_options:
+                    doc_options_html = f'<div class="rest-doc-options">{" | ".join(doc_options)}</div>'
+
+                rest_items.append(f'''
+                <div class="rest-call-item">
+                    <div class="rest-call-header">
+                        <strong>{escape_html(call.call_name or call.call_id or "REST Call")}</strong>
+                        <span class="badge badge-info">{escape_html(call.http_method or "POST")}</span>
+                    </div>
+                    <div class="rest-call-details">
+                        <div><span class="label">URL:</span> <code>{escape_html(call.url)}</code></div>
+                        {f'<div><span class="label">Credential:</span> {escape_html(call.credential_no)}</div>' if call.credential_no else ''}
+                        {f'<div class="label" style="margin-top: 0.5rem;">Body Parameters:</div>{body_params_html}' if body_params_html else ''}
+                        {doc_options_html}
+                        {resp_script_html}
+                    </div>
+                </div>
+                ''')
+
+            rest_calls_html = f'''
+            <div style="margin-top: 0.75rem;">
+                <div class="label" style="font-size: 0.75rem; color: var(--text-muted); text-transform: uppercase; margin-bottom: 0.5rem;">REST Service Calls</div>
+                {''.join(rest_items)}
+            </div>
+            '''
+
         # Action type info
         action_type_html = ""
         if task.action_type:
@@ -1231,6 +1291,7 @@ class HTMLGenerator:
                 {script_html}
                 {checklist_html}
                 {notification_html}
+                {rest_calls_html}
             </div>
         </div>
         '''

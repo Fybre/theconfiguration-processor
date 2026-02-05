@@ -127,6 +127,22 @@ class WorkflowTransition:
 
 
 @dataclass
+class RestServiceCall:
+    """Represents a REST service call configuration."""
+    call_name: str = ""
+    call_id: str = ""
+    http_method: str = ""
+    url: str = ""
+    credential_no: str = ""
+    body_params: List[Dict[str, str]] = field(default_factory=list)
+    response_script: str = ""
+    doc_to_send: str = ""
+    to_pdf: bool = False
+    part_name_file: str = ""
+    part_name_metadata: str = ""
+
+
+@dataclass
 class WorkflowTask:
     """Represents a workflow task."""
     task_no: int
@@ -157,6 +173,7 @@ class WorkflowTask:
     init_script: str = ""  # Extracted initialization script
     notification_subject: str = ""  # Email notification subject
     notification_message: str = ""  # Email notification body (HTML)
+    rest_calls: List[RestServiceCall] = field(default_factory=list)  # REST service calls
 
 
 @dataclass
