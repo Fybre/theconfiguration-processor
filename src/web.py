@@ -342,7 +342,7 @@ UPLOAD_PAGE = """
             }
         }
 
-        /* AI Generation Progress Bar */
+        /* Progress Overlay */
         .progress-overlay {
             display: none;
             position: fixed;
@@ -515,12 +515,12 @@ UPLOAD_PAGE = """
         <p class="version">v{{ version }}</p>
     </div>
 
-    <!-- AI Generation Progress Overlay -->
+    <!-- Progress Overlay -->
     <div id="progressOverlay" class="progress-overlay">
         <div class="progress-box">
             <div class="progress-title">
                 <span class="progress-spinner"></span>
-                Generating AI Summaries
+                Processing
             </div>
             <div class="progress-bar-container">
                 <div id="progressBar" class="progress-bar">0%</div>
@@ -605,24 +605,25 @@ UPLOAD_PAGE = """
             e.preventDefault();
 
             const aiEnabled = document.getElementById('withAI')?.checked;
-
-            if (aiEnabled) {
-                // Show progress overlay for AI generation
-                showProgressOverlay();
-            } else {
-                // Show progress overlay for non-AI generation too
-                showProgressOverlay();
-            }
+            showProgressOverlay(aiEnabled);
         });
 
-        async function showProgressOverlay() {
+        async function showProgressOverlay(aiEnabled) {
             const progressOverlay = document.getElementById('progressOverlay');
             const progressBar = document.getElementById('progressBar');
             const progressStatus = document.getElementById('progressStatus');
             const progressCurrentItem = document.getElementById('progressCurrentItem');
+            const progressTitle = document.querySelector('.progress-title');
 
             // Generate tracker ID
             const trackerId = generateUUID();
+
+            // Update title based on whether AI is enabled
+            if (aiEnabled) {
+                progressTitle.innerHTML = '<span class="progress-spinner"></span>Generating AI Summaries';
+            } else {
+                progressTitle.innerHTML = '<span class="progress-spinner"></span>Generating Documentation';
+            }
 
             // Show progress overlay
             progressOverlay.classList.add('active');
@@ -653,7 +654,12 @@ UPLOAD_PAGE = """
                 }
 
                 const jobId = uploadResult.job_id;
-                progressStatus.textContent = 'Processing started...';
+
+                if (aiEnabled) {
+                    progressStatus.textContent = 'Processing started...';
+                } else {
+                    progressStatus.textContent = 'Generating documentation...';
+                }
 
                 // Connect to SSE for progress updates
                 const eventSource = new EventSource(`/ai-progress/${trackerId}`);
@@ -671,8 +677,13 @@ UPLOAD_PAGE = """
                         const percent = Math.round((data.completed / data.total) * 100);
                         progressBar.style.width = percent + '%';
                         progressBar.textContent = percent + '%';
-                        progressStatus.textContent = `Processing ${data.completed} of ${data.total} items`;
-                        progressCurrentItem.textContent = data.current;
+
+                        if (aiEnabled) {
+                            progressStatus.textContent = `Processing ${data.completed} of ${data.total} items`;
+                            progressCurrentItem.textContent = data.current;
+                        } else {
+                            progressStatus.textContent = 'Generating documentation...';
+                        }
                     }
                 };
 
@@ -693,6 +704,7 @@ UPLOAD_PAGE = """
                             progressBar.style.width = '100%';
                             progressBar.textContent = '100%';
                             progressStatus.textContent = 'Complete! Loading results...';
+                            progressCurrentItem.textContent = '';
 
                             // Redirect to results page
                             setTimeout(() => {
