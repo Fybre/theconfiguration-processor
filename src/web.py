@@ -92,14 +92,16 @@ class JobManager:
                     'current': current
                 })
 
-    def complete_job(self, job_id: str, result: bytes, filename: str) -> None:
+    def complete_job(self, job_id: str, result: bytes, filename: str, stats: dict = None, title: str = None) -> None:
         """Mark job as completed."""
         with self._lock:
             if job_id in self._jobs:
                 self._jobs[job_id].update({
                     'status': 'completed',
                     'result': result,
-                    'filename': filename
+                    'filename': filename,
+                    'stats': stats or {},
+                    'title': title or filename
                 })
 
     def fail_job(self, job_id: str, error: str) -> None:
@@ -690,42 +692,12 @@ UPLOAD_PAGE = """
                             eventSource.close();
                             progressBar.style.width = '100%';
                             progressBar.textContent = '100%';
-                            progressStatus.textContent = 'Complete! Downloading...';
+                            progressStatus.textContent = 'Complete! Loading results...';
 
-                            // Download the result using fetch and blob
-                            try {
-                                const resultResponse = await fetch(`/job-result/${jobId}`);
-                                const blob = await resultResponse.blob();
-                                const filename = resultResponse.headers.get('Content-Disposition')
-                                    ?.split('filename=')[1]
-                                    ?.replace(/"/g, '') || 'documentation.html';
-
-                                // Create download link and trigger it
-                                const url = window.URL.createObjectURL(blob);
-                                const a = document.createElement('a');
-                                a.style.display = 'none';
-                                a.href = url;
-                                a.download = filename;
-                                document.body.appendChild(a);
-                                a.click();
-                                window.URL.revokeObjectURL(url);
-                                document.body.removeChild(a);
-
-                                progressStatus.textContent = 'Download complete!';
-
-                                // Close overlay and reload page
-                                setTimeout(() => {
-                                    progressOverlay.classList.remove('active');
-                                    window.location.reload();
-                                }, 2000);
-                            } catch (error) {
-                                console.error('Download error:', error);
-                                progressStatus.textContent = 'Download failed. Refreshing page...';
-                                setTimeout(() => {
-                                    progressOverlay.classList.remove('active');
-                                    window.location.reload();
-                                }, 2000);
-                            }
+                            // Redirect to results page
+                            setTimeout(() => {
+                                window.location.href = `/job-result-page/${jobId}`;
+                            }, 500);
 
                         } else if (status.status === 'failed') {
                             clearInterval(pollInterval);
@@ -978,7 +950,7 @@ RESULT_PAGE = """
     <div class="header">
         <h1>{{ title }}</h1>
         <div class="header-actions">
-            <a href="/download" class="btn btn-primary">
+            <a href="{% if job_id %}/job-result/{{ job_id }}{% else %}/download{% endif %}" class="btn btn-primary">
                 <span>⬇️</span> Download HTML
             </a>
             <a href="/" class="btn btn-secondary">
@@ -1332,10 +1304,23 @@ def process_file_async(job_id: str, xml_content: str, filename: str, with_ai: bo
         generator = HTMLGenerator(config, title=title, ai_summaries=ai_summaries)
         html_content = generator.generate_string()
 
+        # Get stats
+        stats_dict = config.get_statistics()
+        stats = [
+            ("Categories", stats_dict.get("categories", 0)),
+            ("Fields", stats_dict.get("fields", 0)),
+            ("Workflows", stats_dict.get("workflows", 0)),
+            ("Tasks", stats_dict.get("workflow_tasks", 0)),
+            ("Folders", stats_dict.get("folders", 0)),
+            ("Roles", stats_dict.get("roles", 0)),
+            ("EForms", stats_dict.get("eforms", 0)),
+            ("Dictionaries", stats_dict.get("keyword_dictionaries", 0)),
+        ]
+
         # Complete the job
         result_bytes = html_content.encode('utf-8')
         result_filename = filename.replace('.xml', '_documentation.html')
-        job_manager.complete_job(job_id, result_bytes, result_filename)
+        job_manager.complete_job(job_id, result_bytes, result_filename, stats, title)
 
     except Exception as e:
         print(f"✗ Job {job_id} failed: {e}")
@@ -1438,6 +1423,29 @@ def job_result(job_id):
             'Content-Disposition': f'attachment; filename="{job["filename"]}"'
         }
     )
+
+
+@app.route('/job-result-page/<job_id>', methods=['GET'])
+def job_result_page(job_id):
+    """Display job result page with stats and download button."""
+    job = job_manager.get_job(job_id)
+    if not job:
+        return render_template_string(UPLOAD_PAGE, error="Job not found", version=__version__,
+                                    ai_configured=AI_CONFIGURED)
+
+    if job['status'] != 'completed':
+        return render_template_string(UPLOAD_PAGE, error="Job not completed yet", version=__version__,
+                                    ai_configured=AI_CONFIGURED)
+
+    # Store job_id in session for download
+    session['current_job_id'] = job_id
+
+    # Display results page
+    return render_template_string(RESULT_PAGE,
+                                 title=job.get('title', 'Configuration'),
+                                 stats=job.get('stats', []),
+                                 version=__version__,
+                                 job_id=job_id)
 
 
 @app.route('/compare', methods=['POST'])
