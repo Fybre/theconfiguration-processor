@@ -1,2 +1,9 @@
 samples
-src/__pycache__
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+.env
+*.egg-info/
+.pytest_cache/
+*.log

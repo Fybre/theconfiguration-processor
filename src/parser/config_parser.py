@@ -150,10 +150,17 @@ class ConfigurationParser:
 
     def _parse_folder(self, elem: ET.Element) -> Folder:
         """Parse a single folder element."""
+        # Try <Parent> first, then fall back to <ParentNo>
+        parent_elem = elem.find("Parent")
+        if parent_elem is not None:
+            parent_no = get_element_int(parent_elem) or None
+        else:
+            parent_no = get_element_int(elem.find("ParentNo")) or None
+
         folder = Folder(
             folder_no=get_element_int(elem.find("FolderNo")),
             name=get_text_from_tstr(elem.find("Name")),
-            parent_no=get_element_int(elem.find("ParentNo")) or None,
+            parent_no=parent_no,
             folder_type=get_element_int(elem.find("FolderType")),
             id=get_element_text(elem.find("Id")),
         )

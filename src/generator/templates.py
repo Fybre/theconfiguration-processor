@@ -536,6 +536,37 @@ tr:hover {
     color: #4b5563;
 }
 
+/* AI Summary */
+.ai-summary {
+    background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+    border-radius: 8px;
+    padding: 1rem;
+    margin: 1rem 0;
+    color: white;
+}
+
+.ai-summary-badge {
+    font-size: 0.75rem;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+    margin-bottom: 0.5rem;
+    opacity: 0.9;
+}
+
+.ai-summary-content {
+    font-size: 0.95rem;
+    line-height: 1.6;
+    white-space: pre-wrap;
+}
+
+/* Dark mode support for AI summary */
+@media (prefers-color-scheme: dark) {
+    .ai-summary {
+        background: linear-gradient(135deg, #4c51bf 0%, #553c9a 100%);
+    }
+}
+
 /* Section */
 .section {
     margin-bottom: 3rem;
@@ -1366,6 +1397,111 @@ a:hover {
     }
 }
 
+
+/* Mermaid Diagram Overlay */
+.diagram-overlay {
+    display: none;
+    position: fixed;
+    top: 0;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    background: rgba(0, 0, 0, 0.9);
+    z-index: 10000;
+    padding: 2rem;
+    overflow: hidden;
+}
+
+.diagram-overlay.active {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+}
+
+.diagram-overlay-header {
+    background: #f8f9fa;
+    padding: 1rem 1.5rem;
+    border-bottom: 2px solid #e9ecef;
+    border-radius: 8px 8px 0 0;
+}
+
+.diagram-overlay-header h3 {
+    margin: 0 0 0.5rem 0;
+    font-size: 1.1rem;
+    color: #333;
+}
+
+.diagram-overlay-instructions {
+    font-size: 0.85rem;
+    color: #6c757d;
+    margin: 0;
+    line-height: 1.5;
+}
+
+.diagram-overlay-content {
+    background: white;
+    border-radius: 0 0 8px 8px;
+    max-width: 95vw;
+    max-height: 80vh;
+    overflow-x: auto;
+    overflow-y: auto;
+    position: relative;
+}
+
+.diagram-overlay-wrapper {
+    background: white;
+    border-radius: 8px;
+    box-shadow: 0 10px 40px rgba(0,0,0,0.3);
+    max-width: 95vw;
+}
+
+.diagram-overlay-content svg {
+    display: block;
+}
+
+.diagram-overlay-close {
+    position: fixed;
+    top: 1rem;
+    right: 1rem;
+    background: white;
+    border: none;
+    border-radius: 50%;
+    width: 40px;
+    height: 40px;
+    font-size: 24px;
+    cursor: pointer;
+    box-shadow: 0 2px 10px rgba(0,0,0,0.3);
+    z-index: 10001;
+}
+
+.diagram-overlay-close:hover {
+    background: #f3f4f6;
+}
+
+.mermaid-container {
+    cursor: pointer;
+    position: relative;
+}
+
+.mermaid-container::after {
+    content: '🔍 Click to expand';
+    position: absolute;
+    top: 10px;
+    right: 10px;
+    background: rgba(0,0,0,0.7);
+    color: white;
+    padding: 0.5rem;
+    border-radius: 4px;
+    font-size: 0.85rem;
+    opacity: 0;
+    transition: opacity 0.2s;
+    pointer-events: none;
+}
+
+.mermaid-container:hover::after {
+    opacity: 1;
+}
+
 /* Responsive */
 @media (max-width: 768px) {
     .sidebar {
@@ -1705,6 +1841,102 @@ HTML_FOOTER = """
     <footer class="app-footer">
         <span class="version-info">Therefore Config Processor v{app_version}</span>
     </footer>
+    <script src="https://cdn.jsdelivr.net/npm/mermaid@10/dist/mermaid.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/svg-pan-zoom@3.6.1/dist/svg-pan-zoom.min.js"></script>
+    <script>
+        mermaid.initialize({{ startOnLoad: true }});
+
+        // Wait for Mermaid to finish rendering, then add click-to-expand
+        mermaid.run().then(() => {{
+            let currentPanZoom = null;
+
+            // Create overlay element
+            const overlay = document.createElement('div');
+            overlay.className = 'diagram-overlay';
+            overlay.innerHTML = `
+                <button class="diagram-overlay-close" onclick="this.parentElement.classList.remove('active')">&times;</button>
+                <div class="diagram-overlay-wrapper">
+                    <div class="diagram-overlay-header">
+                        <h3>Workflow Diagram</h3>
+                        <p class="diagram-overlay-instructions">
+                            🖱️ Mouse wheel to zoom • Click and drag to pan • Double-click to zoom in • Press ESC to close
+                        </p>
+                    </div>
+                    <div class="diagram-overlay-content"></div>
+                </div>
+            `;
+            document.body.appendChild(overlay);
+
+            // Add click handlers to all mermaid containers
+            document.querySelectorAll('.mermaid-container').forEach(container => {{
+                container.addEventListener('click', function(e) {{
+                    const svg = this.querySelector('svg');
+                    if (svg) {{
+                        // Clone the entire SVG with all attributes
+                        const clone = svg.cloneNode(true);
+
+                        // Preserve viewBox and dimensions
+                        if (svg.hasAttribute('viewBox')) {{
+                            clone.setAttribute('viewBox', svg.getAttribute('viewBox'));
+                        }}
+
+                        // Set explicit dimensions from the original
+                        const bbox = svg.getBBox();
+                        clone.setAttribute('width', bbox.width);
+                        clone.setAttribute('height', bbox.height);
+                        clone.style.maxWidth = 'none';
+                        clone.style.width = bbox.width + 'px';
+                        clone.style.height = bbox.height + 'px';
+
+                        const content = overlay.querySelector('.diagram-overlay-content');
+                        content.innerHTML = '';
+                        content.appendChild(clone);
+                        overlay.classList.add('active');
+
+                        // Initialize pan & zoom on the cloned SVG
+                        setTimeout(() => {{
+                            if (currentPanZoom) {{
+                                currentPanZoom.destroy();
+                            }}
+                            currentPanZoom = svgPanZoom(clone, {{
+                                zoomEnabled: true,
+                                controlIconsEnabled: true,
+                                fit: false,
+                                center: false,
+                                minZoom: 0.1,
+                                maxZoom: 20,
+                                zoomScaleSensitivity: 0.3,
+                                dblClickZoomEnabled: true,
+                                mouseWheelZoomEnabled: true
+                            }});
+                        }}, 50);
+                    }}
+                }});
+            }});
+
+            // Close on overlay background click
+            overlay.addEventListener('click', function(e) {{
+                if (e.target === overlay) {{
+                    if (currentPanZoom) {{
+                        currentPanZoom.destroy();
+                        currentPanZoom = null;
+                    }}
+                    overlay.classList.remove('active');
+                }}
+            }});
+
+            // Close on Escape key
+            document.addEventListener('keydown', function(e) {{
+                if (e.key === 'Escape' && overlay.classList.contains('active')) {{
+                    if (currentPanZoom) {{
+                        currentPanZoom.destroy();
+                        currentPanZoom = null;
+                    }}
+                    overlay.classList.remove('active');
+                }}
+            }});
+        }});
+    </script>
     <script>
 {javascript}
     </script>
@@ -1733,6 +1965,7 @@ SIDEBAR_TEMPLATE = """
             </div>
             <div class="nav-items">
                 <a href="#overview" class="nav-item active">Dashboard</a>
+                <a href="#security-audit" class="nav-item">🔒 Security Audit</a>
             </div>
         </div>
         {nav_sections}
@@ -1767,6 +2000,8 @@ OVERVIEW_TEMPLATE = """
         <button type="button" class="content-search-clear" id="content-search-clear" title="Clear search">&times;</button>
         <span id="content-search-count" class="content-search-count"></span>
     </div>
+
+    {ai_summary}
 
     <div class="stats-grid">
         {stats_cards}
@@ -1829,6 +2064,7 @@ CATEGORY_TEMPLATE = """
         <span class="id">{guid}</span>
     </div>
     <div class="item-detail-body">
+        {ai_summary}
         <div class="property-grid">
             <div class="property">
                 <span class="property-label">Title</span>
@@ -1910,6 +2146,7 @@ WORKFLOW_TEMPLATE = """
         <span class="id">{guid}</span>
     </div>
     <div class="item-detail-body">
+        {ai_summary}
         <div class="property-grid">
             <div class="property">
                 <span class="property-label">Process ID</span>
@@ -1948,6 +2185,7 @@ WORKFLOW_TEMPLATE = """
                 <span class="property-value">{notify_on_error}</span>
             </div>
         </div>
+        {flow_diagram}
         {tasks_section}
     </div>
 </div>
@@ -2020,6 +2258,7 @@ ROLE_TEMPLATE = """
         <span class="id">{guid}</span>
     </div>
     <div class="item-detail-body">
+        {ai_summary}
         <div class="property-grid">
             <div class="property">
                 <span class="property-label">Description</span>
@@ -2067,6 +2306,7 @@ EFORM_TEMPLATE = """
         <span class="id">{guid}</span>
     </div>
     <div class="item-detail-body">
+        {ai_summary}
         <div class="property-grid">
             <div class="property">
                 <span class="property-label">Form ID</span>
@@ -2133,6 +2373,7 @@ DICTIONARY_TEMPLATE = """
         <span class="id">{guid}</span>
     </div>
     <div class="item-detail-body">
+        {ai_summary}
         <div class="property-grid">
             <div class="property">
                 <span class="property-label">Description</span>
@@ -2229,4 +2470,20 @@ STAMP_TEMPLATE = """
         </div>
     </div>
 </div>
+"""
+
+SECURITY_AUDIT_TEMPLATE = """
+<section id="security-audit" class="section">
+    <div class="page-header">
+        <h1>Security Audit Report</h1>
+        <p class="subtitle">Access Control Analysis</p>
+    </div>
+
+    {conflicts_section}
+    {unsecured_section}
+    {deny_roles_section}
+    {overprivileged_section}
+    {role_matrix_section}
+    {user_access_section}
+</section>
 """

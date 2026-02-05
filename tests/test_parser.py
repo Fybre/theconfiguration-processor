@@ -524,7 +524,6 @@ class TestHTMLGenerator:
         assert 'id="overview"' in html
         assert 'id="categories"' in html
         assert 'id="workflows"' in html
-        assert 'id="folders"' in html
 
     def test_generate_file(self, parsed_config):
         """Test file generation."""

@@ -12,6 +12,7 @@ from ..parser.models import (
 )
 from ..parser.constants import ObjectType, UserType
 from ..utils.helpers import escape_html, slugify
+from ..analyzer.security_analyzer import SecurityAnalyzer
 from .templates import (
     CSS_STYLES, JAVASCRIPT, HTML_HEAD, HTML_FOOTER, SIDEBAR_TEMPLATE,
     NAV_SECTION_TEMPLATE, NAV_ITEM_TEMPLATE, OVERVIEW_TEMPLATE,
@@ -20,16 +21,18 @@ from .templates import (
     TASKS_TABLE_TEMPLATE, TASK_ROW_TEMPLATE, FOLDER_TREE_TEMPLATE,
     FOLDER_ITEM_TEMPLATE, ROLE_TEMPLATE, USERS_TABLE_TEMPLATE,
     EFORM_TEMPLATE, QUERY_TEMPLATE, DICTIONARY_TEMPLATE,
-    TREEVIEW_TEMPLATE, COUNTER_TEMPLATE, DATATYPE_TEMPLATE, STAMP_TEMPLATE
+    TREEVIEW_TEMPLATE, COUNTER_TEMPLATE, DATATYPE_TEMPLATE, STAMP_TEMPLATE,
+    SECURITY_AUDIT_TEMPLATE
 )
 
 
 class HTMLGenerator:
     """Generates HTML documentation from a Therefore configuration."""
 
-    def __init__(self, config: Configuration, title: str = "Therefore Configuration"):
+    def __init__(self, config: Configuration, title: str = "Therefore Configuration", ai_summaries: Dict = None):
         self.config = config
         self.title = title
+        self.ai_summaries = ai_summaries or {}
 
     def generate(self, output_path: str) -> str:
         """
@@ -77,7 +80,7 @@ class HTMLGenerator:
         # Main content
         parts.append('<main class="main-content" id="top">')
         parts.append(self._generate_overview())
-        parts.append(self._generate_folders_section())  # Design Structure - right after overview
+        parts.append(self._generate_security_audit_section())
         parts.append(self._generate_case_definitions_section())
         parts.append(self._generate_categories_section())
         parts.append(self._generate_workflows_section())
@@ -100,20 +103,54 @@ class HTMLGenerator:
 
         return '\n'.join(parts)
 
+    def _render_ai_summary(self, summary_key: str, element_id: str = None) -> str:
+        """
+        Render AI-generated summary if available.
+
+        Args:
+            summary_key: Key path in ai_summaries dict (e.g., 'overview.system', 'categories.1')
+            element_id: Optional element ID for category/workflow/role lookups
+
+        Returns:
+            HTML string for AI summary section or empty string if not available
+        """
+        if not self.ai_summaries:
+            return ""
+
+        # Parse the key path (e.g., 'categories.1' -> ['categories', '1'])
+        parts = summary_key.split('.')
+        summary = self.ai_summaries
+
+        # Navigate through nested dict
+        for part in parts:
+            if not isinstance(summary, dict):
+                return ""
+            summary = summary.get(part)
+            if summary is None:
+                return ""
+
+        # If we have an element_id, try to look it up
+        if element_id and isinstance(summary, dict):
+            summary = summary.get(element_id)
+            if summary is None:
+                return ""
+
+        # Render the summary
+        if not summary:
+            return ""
+
+        return f'''
+        <div class="ai-summary">
+            <div class="ai-summary-badge">✨ AI Generated Summary</div>
+            <div class="ai-summary-content">
+                {escape_html(summary)}
+            </div>
+        </div>
+        '''
+
     def _generate_sidebar(self) -> str:
         """Generate the navigation sidebar."""
         nav_sections = []
-
-        # Design Structure (folders) comes first - no sub-items, just a link
-        if self.config.folders:
-            nav_sections.append(
-                '<div class="nav-section">'
-                '<a href="#folders" class="nav-section-header" style="text-decoration: none;">'
-                '<span class="icon">&#128193;</span>'
-                'Design Structure'
-                '</a>'
-                '</div>'
-            )
 
         # Filter out categories that belong to case definitions
         standalone_categories = [c for c in self.config.categories if not c.belongs_to_case_def]
@@ -144,6 +181,23 @@ class HTMLGenerator:
                 continue
 
             nav_items = []
+
+            # Add Design Structure link for sections that have folder organization
+            design_structure_sections = {
+                "categories": "category-design-structure",
+                "workflows": "workflow-design-structure",
+                "eforms": "eform-design-structure",
+                "queries": "query-design-structure",
+                "dictionaries": "dictionary-design-structure",
+                "treeviews": "treeview-design-structure",
+                "counters": "counter-design-structure",
+                "stamps": "stamp-design-structure",
+                "datatypes": "datatype-design-structure",
+            }
+
+            if section_id in design_structure_sections and self.config.folders:
+                nav_items.append(f'<a href="#{design_structure_sections[section_id]}" class="nav-item" style="font-style: italic; color: var(--text-muted);">📁 Design Structure</a>')
+
             for item in items[:50]:  # Limit to 50 items in nav
                 name = getattr(item, 'name', '') or getattr(item, 'title', '') or f"#{getattr(item, section_id[:-1] + '_no', '')}"
                 item_id = self._get_item_id(section_id, item)
@@ -225,8 +279,21 @@ class HTMLGenerator:
         # Generate root security section
         root_security_section = self._generate_root_security_section()
 
+        # Generate AI summary if available
+        ai_summary = ""
+        if self.ai_summaries and 'overview' in self.ai_summaries:
+            system_summary = self.ai_summaries['overview'].get('system')
+            if system_summary:
+                ai_summary = f'''
+                <div class="ai-summary">
+                    <div class="ai-summary-badge">✨ AI Generated Summary</div>
+                    <div class="ai-summary-content">{escape_html(system_summary)}</div>
+                </div>
+                '''
+
         return OVERVIEW_TEMPLATE.format(
             title=escape_html(self.title),
+            ai_summary=ai_summary,
             stats_cards='\n'.join(stats_cards),
             version_warning_section=version_warning_section,
             validation_section=validation_section,
@@ -234,6 +301,11 @@ class HTMLGenerator:
             version=escape_html(self.config.version or "N/A"),
             generated_date=datetime.now().strftime("%Y-%m-%d %H:%M:%S")
         )
+
+    def _generate_security_audit_section(self) -> str:
+        """Generate the security audit report section."""
+        from .html_generator_security import generate_security_audit_section
+        return generate_security_audit_section(self)
 
     def _generate_version_warning_section(self) -> str:
         """Generate a warning section if the config version is newer than supported."""
@@ -375,6 +447,12 @@ class HTMLGenerator:
             return ""
 
         items = []
+
+        # Add Category Design Structure at the beginning
+        folder_tree = self._render_folder_tree_for_type(['Category'], 'Category Design Structure', 'category-design-structure')
+        if folder_tree:
+            items.append(folder_tree)
+
         for category in standalone_categories:
             items.append(self._render_category(category))
 
@@ -452,11 +530,24 @@ class HTMLGenerator:
         # Build "Used by" section showing related objects
         used_by_section = self._render_category_used_by(category)
 
+        # Generate AI summary if available
+        ai_summary = ""
+        if self.ai_summaries and 'categories' in self.ai_summaries:
+            category_summary = self.ai_summaries['categories'].get(category.category_no)
+            if category_summary:
+                ai_summary = f'''
+                <div class="ai-summary">
+                    <div class="ai-summary-badge">✨ AI Generated Summary</div>
+                    <div class="ai-summary-content">{escape_html(category_summary)}</div>
+                </div>
+                '''
+
         return CATEGORY_TEMPLATE.format(
             id=slugify(category.name) or str(abs(category.category_no)),
             name=escape_html(category.name),
             category_no=abs(category.category_no),
             badges=' '.join(badges),
+            ai_summary=ai_summary,
             guid=escape_html(category.id or ""),
             title=escape_html(category.title or category.name),
             description=escape_html(category.description or "-"),
@@ -828,6 +919,12 @@ class HTMLGenerator:
             return ""
 
         items = []
+
+        # Add Workflow Design Structure at the beginning
+        folder_tree = self._render_folder_tree_for_type(['Workflow'], 'Workflow Design Structure', 'workflow-design-structure')
+        if folder_tree:
+            items.append(folder_tree)
+
         for workflow in self.config.workflows:
             items.append(self._render_workflow(workflow))
 
@@ -838,10 +935,98 @@ class HTMLGenerator:
             content='\n'.join(items)
         )
 
+    def _generate_workflow_flowchart(self, workflow: WorkflowProcess, task_map: dict) -> str:
+        """Generate Mermaid flowchart for workflow.
+
+        Args:
+            workflow: Workflow to generate chart for
+            task_map: Dictionary mapping task_no to task objects
+
+        Returns:
+            HTML with Mermaid flowchart
+        """
+        if not workflow.tasks:
+            return ""
+
+        # Build Mermaid diagram
+        mermaid_lines = ["flowchart TD"]
+
+        # Add task nodes with appropriate shapes
+        for task in workflow.tasks:
+            node_id = f"task{task.task_no}"
+            task_name = task.name.replace('"', "'")  # Escape quotes
+
+            # Different shapes for different task types
+            if task.type_no == 1:  # Start
+                mermaid_lines.append(f'    {node_id}(["{task_name}"])')
+            elif task.type_no == 2:  # End
+                mermaid_lines.append(f'    {node_id}(("{task_name}"))')
+            elif task.type_no == 3:  # Manual
+                mermaid_lines.append(f'    {node_id}["{task_name}"]')
+            elif task.type_no == 4:  # Automatic
+                mermaid_lines.append(f'    {node_id}["{task_name}\\n(Auto)"]')
+            else:
+                mermaid_lines.append(f'    {node_id}["{task_name}"]')
+
+        # Add transitions with labels
+        for task in workflow.tasks:
+            from_id = f"task{task.task_no}"
+            for trans in task.transitions:
+                to_id = f"task{trans.task_to_no}"
+                label = trans.action_text or trans.name or ""
+
+                # Add condition if present
+                if trans.condition:
+                    # Resolve field macros like [-452] to [StatusNo]
+                    resolved_condition = self.config.resolve_field_macros(trans.condition)
+                    condition_short = resolved_condition[:30].replace('"', "'")
+                    if len(resolved_condition) > 30:
+                        condition_short += "..."
+                    label = f"{label}|IF: {condition_short}|" if label else f"|IF: {condition_short}|"
+
+                if label:
+                    label = label.replace('"', "'")  # Escape quotes
+                    mermaid_lines.append(f'    {from_id} -->|"{label}"| {to_id}')
+                else:
+                    mermaid_lines.append(f'    {from_id} --> {to_id}')
+
+        # Style nodes by type
+        mermaid_lines.append("    classDef startNode fill:#d4edda,stroke:#28a745,stroke-width:2px")
+        mermaid_lines.append("    classDef endNode fill:#f8d7da,stroke:#dc3545,stroke-width:2px")
+        mermaid_lines.append("    classDef manualNode fill:#cce5ff,stroke:#004085,stroke-width:2px")
+        mermaid_lines.append("    classDef autoNode fill:#fff3cd,stroke:#856404,stroke-width:2px")
+
+        for task in workflow.tasks:
+            node_id = f"task{task.task_no}"
+            if task.type_no == 1:
+                mermaid_lines.append(f"    class {node_id} startNode")
+            elif task.type_no == 2:
+                mermaid_lines.append(f"    class {node_id} endNode")
+            elif task.type_no == 3:
+                mermaid_lines.append(f"    class {node_id} manualNode")
+            elif task.type_no == 4:
+                mermaid_lines.append(f"    class {node_id} autoNode")
+
+        mermaid_code = "\n".join(mermaid_lines)
+
+        return f'''
+        <div class="fields-list">
+            <h4>Process Flow Diagram</h4>
+            <div class="mermaid-container" style="background: white; padding: 20px; border-radius: 8px; overflow-x: auto;">
+                <pre class="mermaid">
+{mermaid_code}
+                </pre>
+            </div>
+        </div>
+        '''
+
     def _render_workflow(self, workflow: WorkflowProcess) -> str:
         """Render a single workflow with enhanced details."""
         # Build task lookup map for transitions
         task_map = {task.task_no: task for task in workflow.tasks}
+
+        # Generate flow diagram using Mermaid
+        flow_diagram = self._generate_workflow_flowchart(workflow, task_map)
 
         # Tasks section - rendered as expandable cards
         tasks_section = ""
@@ -886,10 +1071,24 @@ class HTMLGenerator:
             else:
                 duration_str = f"{mins} minutes"
 
+        # Generate AI summary if available
+        ai_summary = ""
+        if self.ai_summaries and 'workflows' in self.ai_summaries:
+            workflow_summary = self.ai_summaries['workflows'].get(workflow.process_no)
+            if workflow_summary:
+                ai_summary = f'''
+                <div class="ai-summary">
+                    <div class="ai-summary-badge">✨ AI Generated Summary</div>
+                    <div class="ai-summary-content">{escape_html(workflow_summary)}</div>
+                </div>
+                '''
+
         return WORKFLOW_TEMPLATE.format(
             id=slugify(workflow.name) or str(abs(workflow.process_no)),
             name=escape_html(workflow.name),
             badges=' '.join(badges),
+            ai_summary=ai_summary,
+            flow_diagram=flow_diagram,
             guid=escape_html(workflow.id or ""),
             process_id=escape_html(workflow.process_id or "-"),
             description=escape_html(workflow.description or "-"),
@@ -1036,30 +1235,111 @@ class HTMLGenerator:
         </div>
         '''
 
-    def _generate_folders_section(self) -> str:
-        """Generate the folders section."""
+    def _render_folder_tree_for_type(self, item_types: List[str], title: str, section_id: str) -> str:
+        """Generate a folder tree for specific item types."""
         if not self.config.folders:
             return ""
 
         # Build mapping of folder_no to all object types
-        folder_items = self._build_folder_items_map()
+        all_folder_items = self._build_folder_items_map()
 
-        tree_content = self._render_folder_tree(self.config.folders, folder_items)
+        # Filter to only the specified item types
+        folder_items: Dict[int, List[Dict]] = {}
+        for folder_no, items in all_folder_items.items():
+            filtered_items = [item for item in items if item['type'] in item_types]
+            if filtered_items:
+                folder_items[folder_no] = filtered_items
+
+        # Only render if there are items of this type in folders
+        if not folder_items:
+            return ""
+
+        # Filter folders to only include those with items (or descendants with items)
+        filtered_folders = self._filter_empty_folders(self.config.folders, folder_items)
+
+        if not filtered_folders:
+            return ""
+
+        tree_content = self._render_folder_tree_simplified(filtered_folders, folder_items)
+
+        # If tree is empty, return empty
+        if not tree_content.strip():
+            return ""
 
         content = FOLDER_TREE_TEMPLATE.format(tree_content=tree_content)
 
-        # Use a custom section without the count for Design Structure
         return f'''
-        <section id="folders" class="section collapsible-section">
-            <div class="section-header collapsible-header" onclick="this.parentElement.classList.toggle('collapsed')">
-                <span class="expand-icon">&#9660;</span>
-                <h2>Design Structure</h2>
-            </div>
-            <div class="collapsible-body">
-                {content}
-            </div>
-        </section>
+        <div id="{section_id}" class="subsection" style="margin-bottom: 2rem;">
+            <h3 style="margin-bottom: 1rem; color: var(--text-muted); font-size: 1.1rem;">{title}</h3>
+            {content}
+        </div>
         '''
+
+    def _filter_empty_folders(self, folders: List[Folder], folder_items: Dict[int, List[Dict]]) -> List[Folder]:
+        """Recursively filter out folders that don't contain any items or have descendants with items."""
+        filtered = []
+        for folder in folders:
+            # Recursively filter children first
+            filtered_children = self._filter_empty_folders(folder.children, folder_items) if folder.children else []
+
+            # Include folder if it has items or has children with items
+            has_items = folder.folder_no in folder_items
+            has_children = len(filtered_children) > 0
+
+            if has_items or has_children:
+                # Create a copy of the folder with filtered children
+                from copy import copy
+                filtered_folder = copy(folder)
+                filtered_folder.children = filtered_children
+                filtered.append(filtered_folder)
+
+        return filtered
+
+    def _render_folder_tree_simplified(self, folders: List[Folder], folder_items: Dict[int, List[Dict]], level: int = 0) -> str:
+        """Render folder tree recursively for a specific type, without type badges."""
+        items = []
+        for folder in folders:
+            # Build children content (subfolders + items)
+            children_parts = []
+
+            # Add subfolders first
+            if folder.children:
+                children_parts.append(self._render_folder_tree_simplified(folder.children, folder_items, level + 1))
+
+            # Add items in this folder (sorted by name)
+            folder_contents = folder_items.get(folder.folder_no, [])
+            folder_contents.sort(key=lambda x: x['name'])
+
+            for item in folder_contents:
+                children_parts.append(f'''
+                <div class="tree-item tree-item-object" data-type="{item['type'].lower().replace(' ', '-')}">
+                    <div class="tree-item-label">
+                        <span class="icon">{item['icon']}</span>
+                        <a href="{item['href']}">{escape_html(item['name'])}</a>
+                    </div>
+                </div>
+                ''')
+
+            children = ""
+            if children_parts:
+                children = f'<div class="tree">{"".join(children_parts)}</div>'
+
+            # Get folder security info
+            security_badges, security_details, security_class = self._render_folder_security(folder.folder_no)
+
+            items.append(f'''
+            <div class="tree-item tree-item-folder{security_class}">
+                <div class="tree-item-label">
+                    <span class="icon">&#128193;</span>
+                    <span>{escape_html(folder.name)}</span>
+                    {security_badges}
+                </div>
+                {security_details}
+                {children}
+            </div>
+            ''')
+
+        return '\n'.join(items)
 
     def _build_folder_items_map(self) -> Dict[int, List[Dict]]:
         """Build a mapping of folder_no to all items in that folder."""
@@ -1330,10 +1610,23 @@ class HTMLGenerator:
         # Deny badge for deny roles
         deny_badge = '<span class="badge badge-danger">DENY</span>' if role.is_deny else ''
 
+        # Generate AI summary if available
+        ai_summary = ""
+        if self.ai_summaries and 'roles' in self.ai_summaries:
+            role_summary = self.ai_summaries['roles'].get(role.role_no)
+            if role_summary:
+                ai_summary = f'''
+                <div class="ai-summary">
+                    <div class="ai-summary-badge">✨ AI Generated Summary</div>
+                    <div class="ai-summary-content">{escape_html(role_summary)}</div>
+                </div>
+                '''
+
         return ROLE_TEMPLATE.format(
             id=slugify(role.name) or str(abs(role.role_no)),
             name=escape_html(role.name),
             deny_badge=deny_badge,
+            ai_summary=ai_summary,
             guid=escape_html(role.id or ""),
             description=escape_html(role.description or "-"),
             permissions=permissions or '<span class="permission-item">None</span>',
@@ -1514,6 +1807,12 @@ class HTMLGenerator:
             return ""
 
         items = []
+
+        # Add EForm Design Structure at the beginning
+        folder_tree = self._render_folder_tree_for_type(['EForm'], 'EForm Design Structure', 'eform-design-structure')
+        if folder_tree:
+            items.append(folder_tree)
+
         for eform in self.config.eforms:
             folder_path = self.config.get_folder_path(eform.folder_no) if eform.folder_no else "-"
 
@@ -1529,9 +1828,22 @@ class HTMLGenerator:
                 </div>
                 '''
 
+            # Generate AI summary if available
+            ai_summary = ""
+            if self.ai_summaries and 'eforms' in self.ai_summaries:
+                eform_summary = self.ai_summaries['eforms'].get(eform.form_no)
+                if eform_summary:
+                    ai_summary = f'''
+                    <div class="ai-summary">
+                        <div class="ai-summary-badge">✨ AI Generated Summary</div>
+                        <div class="ai-summary-content">{escape_html(eform_summary)}</div>
+                    </div>
+                    '''
+
             items.append(EFORM_TEMPLATE.format(
                 id=slugify(eform.name) or str(abs(eform.form_no)),
                 name=escape_html(eform.name),
+                ai_summary=ai_summary,
                 guid=escape_html(eform.id or ""),
                 form_id=escape_html(eform.form_id or ""),
                 version=eform.version,
@@ -1759,6 +2071,12 @@ class HTMLGenerator:
             return ""
 
         items = []
+
+        # Add Query Design Structure at the beginning
+        folder_tree = self._render_folder_tree_for_type(['Query'], 'Query Design Structure', 'query-design-structure')
+        if folder_tree:
+            items.append(folder_tree)
+
         for query in self.config.queries:
             folder_path = self.config.get_folder_path(query.folder_no) if query.folder_no else "-"
             category = self.config.get_category(query.category_no) if query.category_no else None
@@ -1791,6 +2109,12 @@ class HTMLGenerator:
             return ""
 
         items = []
+
+        # Add Dictionary Design Structure at the beginning
+        folder_tree = self._render_folder_tree_for_type(['Dictionary'], 'Dictionary Design Structure', 'dictionary-design-structure')
+        if folder_tree:
+            items.append(folder_tree)
+
         for dictionary in self.config.keyword_dictionaries:
             folder_path = self.config.get_folder_path(dictionary.folder_no) if dictionary.folder_no else "-"
 
@@ -1846,9 +2170,22 @@ class HTMLGenerator:
                 </div>
                 '''
 
+            # Generate AI summary if available
+            ai_summary = ""
+            if self.ai_summaries and 'dictionaries' in self.ai_summaries:
+                dict_summary = self.ai_summaries['dictionaries'].get(dictionary.dictionary_no)
+                if dict_summary:
+                    ai_summary = f'''
+                    <div class="ai-summary">
+                        <div class="ai-summary-badge">✨ AI Generated Summary</div>
+                        <div class="ai-summary-content">{escape_html(dict_summary)}</div>
+                    </div>
+                    '''
+
             items.append(DICTIONARY_TEMPLATE.format(
                 id=slugify(dictionary.name) or str(abs(dictionary.dictionary_no)),
                 name=escape_html(dictionary.name),
+                ai_summary=ai_summary,
                 guid=escape_html(dictionary.id or ""),
                 keyword_count=len(dictionary.keywords),
                 description=escape_html(dictionary.description or "-"),
@@ -1870,6 +2207,12 @@ class HTMLGenerator:
             return ""
 
         items = []
+
+        # Add Tree View Design Structure at the beginning
+        folder_tree = self._render_folder_tree_for_type(['Tree View'], 'Tree View Design Structure', 'treeview-design-structure')
+        if folder_tree:
+            items.append(folder_tree)
+
         for treeview in self.config.tree_views:
             folder_path = self.config.get_folder_path(treeview.folder_no) if treeview.folder_no else "-"
             category = self.config.get_category(treeview.category_no) if treeview.category_no else None
@@ -1934,6 +2277,12 @@ class HTMLGenerator:
         counter_usage = self.config.get_counter_usage()
 
         items = []
+
+        # Add Counter Design Structure at the beginning
+        folder_tree = self._render_folder_tree_for_type(['Counter'], 'Counter Design Structure', 'counter-design-structure')
+        if folder_tree:
+            items.append(folder_tree)
+
         for counter in self.config.counters:
             # Used by section
             usage = counter_usage.get(counter.counter_no, [])
@@ -1975,6 +2324,12 @@ class HTMLGenerator:
             return ""
 
         items = []
+
+        # Add Data Type Design Structure at the beginning
+        folder_tree = self._render_folder_tree_for_type(['Data Type'], 'Data Type Design Structure', 'datatype-design-structure')
+        if folder_tree:
+            items.append(folder_tree)
+
         for datatype in self.config.data_types:
             # Columns section
             columns_section = ""
@@ -2029,6 +2384,12 @@ class HTMLGenerator:
             return ""
 
         items = []
+
+        # Add Stamp Design Structure at the beginning
+        folder_tree = self._render_folder_tree_for_type(['Stamp'], 'Stamp Design Structure', 'stamp-design-structure')
+        if folder_tree:
+            items.append(folder_tree)
+
         for stamp in self.config.stamps:
             items.append(STAMP_TEMPLATE.format(
                 id=slugify(stamp.name) or str(abs(stamp.stamp_no)),

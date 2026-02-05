@@ -1,14 +1,66 @@
 """Flask web interface for Therefore Configuration Processor."""
 
-from flask import Flask, request, render_template_string, Response, send_file
+from flask import Flask, request, render_template_string, Response, send_file, jsonify, session, stream_with_context
 from io import BytesIO
+import os
+import tempfile
+import uuid
+import json
+import threading
+from pathlib import Path
 from . import __version__
 from .parser.config_parser import ConfigurationParser
 from .generator.html_generator import HTMLGenerator
 from .differ.comparator import DiffComparator
 from .differ.diff_generator import DiffHTMLGenerator
+from .progress_tracker import progress_tracker
+
+# Load .env file if it exists (for local development)
+try:
+    from dotenv import load_dotenv
+    env_path = Path(__file__).parent.parent / '.env'
+    if env_path.exists():
+        load_dotenv(env_path, override=True)  # Override system env vars with .env file
+        print(f"Loaded .env from: {env_path}")
+except ImportError:
+    print("Warning: python-dotenv not installed, environment variables from .env will not be loaded")
+    pass
+
+# Import AI module with graceful degradation
+try:
+    from .ai import LLMConfig, AISummaryGenerator, AI_AVAILABLE
+except ImportError:
+    AI_AVAILABLE = False
+    LLMConfig = None
+    AISummaryGenerator = None
+
+# Load multiple LLM configurations with fallback support
+LLM_TEMPERATURE = float(os.getenv('LLM_TEMPERATURE', '0.4'))
+LLM_CONFIGS = []
+
+# Try to load numbered LLM configs (LLM_1_, LLM_2_, etc.)
+for i in range(1, 10):  # Support up to 9 LLMs
+    base_url = os.getenv(f'LLM_{i}_BASE_URL')
+    if base_url:
+        model_name = os.getenv(f'LLM_{i}_MODEL_NAME', 'gpt-4')
+        api_key = os.getenv(f'LLM_{i}_API_KEY', 'not-needed')
+
+        if AI_AVAILABLE and LLMConfig:
+            config = LLMConfig(
+                base_url=base_url,
+                model_name=model_name,
+                api_key=api_key,
+                temperature=LLM_TEMPERATURE
+            )
+            LLM_CONFIGS.append(config)
+            print(f"Loaded LLM config #{i}: {base_url}")
+
+AI_CONFIGURED = bool(LLM_CONFIGS and AI_AVAILABLE)
 
 app = Flask(__name__)
+
+# Session configuration
+app.secret_key = os.getenv('FLASK_SECRET_KEY', os.urandom(24))
 
 # Maximum file size: 50MB
 app.config['MAX_CONTENT_LENGTH'] = 50 * 1024 * 1024
@@ -215,6 +267,92 @@ UPLOAD_PAGE = """
                 grid-template-columns: 1fr;
             }
         }
+
+        /* AI Generation Progress Bar */
+        .progress-overlay {
+            display: none;
+            position: fixed;
+            top: 0;
+            left: 0;
+            right: 0;
+            bottom: 0;
+            background: rgba(0,0,0,0.8);
+            z-index: 10000;
+            align-items: center;
+            justify-content: center;
+        }
+
+        .progress-overlay.active {
+            display: flex;
+        }
+
+        .progress-box {
+            background: white;
+            border-radius: 12px;
+            padding: 40px;
+            min-width: 500px;
+            max-width: 600px;
+            box-shadow: 0 25px 50px -12px rgba(0,0,0,0.5);
+        }
+
+        .progress-title {
+            font-size: 1.5rem;
+            font-weight: 600;
+            margin-bottom: 25px;
+            text-align: center;
+            color: #1a202c;
+        }
+
+        .progress-bar-container {
+            background: #e2e8f0;
+            height: 35px;
+            border-radius: 17.5px;
+            overflow: hidden;
+            margin-bottom: 15px;
+            box-shadow: inset 0 2px 4px rgba(0,0,0,0.1);
+        }
+
+        .progress-bar {
+            background: linear-gradient(90deg, #667eea 0%, #764ba2 100%);
+            height: 100%;
+            width: 0%;
+            transition: width 0.3s ease;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            color: white;
+            font-weight: 600;
+            font-size: 0.95rem;
+        }
+
+        .progress-status {
+            text-align: center;
+            color: #4a5568;
+            font-size: 1rem;
+            margin-top: 15px;
+            font-weight: 500;
+        }
+
+        .progress-current-item {
+            text-align: center;
+            color: #718096;
+            font-size: 0.85rem;
+            margin-top: 8px;
+            font-style: italic;
+            min-height: 20px;
+        }
+
+        .progress-spinner {
+            display: inline-block;
+            width: 16px;
+            height: 16px;
+            border: 3px solid #e2e8f0;
+            border-top-color: #667eea;
+            border-radius: 50%;
+            animation: spin 1s linear infinite;
+            margin-right: 8px;
+            vertical-align: middle;
+        }
     </style>
 </head>
 <body>
@@ -240,6 +378,24 @@ UPLOAD_PAGE = """
                 <p class="upload-hint">Remember to export Role Assignments for full security information</p>
             </div>
             <input type="file" name="file" id="fileInput" accept=".xml">
+
+            <!-- AI Summary Settings -->
+            {% if ai_configured %}
+            <div class="ai-settings" style="text-align: left; margin: 20px 0; padding: 16px; background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); border-radius: 8px;">
+                <label style="display: flex; align-items: center; gap: 8px; cursor: pointer;">
+                    <input type="checkbox" name="with_ai" id="withAI" style="display: inline-block; width: auto;">
+                    <span style="font-weight: 600; color: white;">✨ Generate AI Summaries</span>
+                </label>
+                <p id="aiStatus" style="font-size: 0.8rem; color: rgba(255,255,255,0.9); margin: 8px 0 0 28px;">
+                    <span class="ai-status-spinner" style="display: inline-block; width: 12px; height: 12px; border: 2px solid rgba(255,255,255,0.3); border-top-color: white; border-radius: 50%; animation: spin 1s linear infinite;"></span>
+                    Checking AI server status...
+                </p>
+                <button type="button" id="clearCacheBtn" style="margin-top: 12px; padding: 8px 16px; background: rgba(255,255,255,0.2); color: white; border: 1px solid rgba(255,255,255,0.3); border-radius: 4px; cursor: pointer; font-size: 0.85rem;">
+                    🗑️ Clear AI Cache
+                </button>
+                <p id="cacheStatus" style="font-size: 0.75rem; color: rgba(255,255,255,0.8); margin: 4px 0 0 0; display: none;"></p>
+            </div>
+            {% endif %}
 
             <button type="submit" id="submitBtn" disabled>
                 <span class="btn-text">Generate Documentation</span>
@@ -283,6 +439,21 @@ UPLOAD_PAGE = """
         </form>
 
         <p class="version">v{{ version }}</p>
+    </div>
+
+    <!-- AI Generation Progress Overlay -->
+    <div id="progressOverlay" class="progress-overlay">
+        <div class="progress-box">
+            <div class="progress-title">
+                <span class="progress-spinner"></span>
+                Generating AI Summaries
+            </div>
+            <div class="progress-bar-container">
+                <div id="progressBar" class="progress-bar">0%</div>
+            </div>
+            <div id="progressStatus" class="progress-status">Initializing...</div>
+            <div id="progressCurrentItem" class="progress-current-item"></div>
+        </div>
     </div>
 
     <script>
@@ -355,11 +526,179 @@ UPLOAD_PAGE = """
             submitBtn.disabled = !fileInput.files.length;
         }
 
-        generateForm.addEventListener('submit', () => {
-            btnText.style.display = 'none';
-            loading.classList.add('active');
-            submitBtn.disabled = true;
+        generateForm.addEventListener('submit', (e) => {
+            const aiEnabled = document.getElementById('withAI')?.checked;
+
+            if (aiEnabled) {
+                // Prevent default form submission
+                e.preventDefault();
+                // Show progress overlay and submit via fetch
+                showProgressOverlay();
+            } else {
+                // Normal loading for non-AI generation
+                btnText.style.display = 'none';
+                loading.classList.add('active');
+                submitBtn.disabled = true;
+            }
         });
+
+        async function showProgressOverlay() {
+            const progressOverlay = document.getElementById('progressOverlay');
+            const progressBar = document.getElementById('progressBar');
+            const progressStatus = document.getElementById('progressStatus');
+            const progressCurrentItem = document.getElementById('progressCurrentItem');
+
+            // Generate tracker ID
+            const trackerId = generateUUID();
+
+            // Show progress overlay
+            progressOverlay.classList.add('active');
+            progressStatus.textContent = 'Initializing progress tracker...';
+            progressCurrentItem.textContent = '';
+            progressBar.style.width = '0%';
+            progressBar.textContent = '0%';
+
+            try {
+                // Create tracker on server first
+                await fetch(`/create-tracker/${trackerId}`, { method: 'POST' });
+
+                progressStatus.textContent = 'Connecting to progress stream...';
+
+                // Now connect to SSE for progress updates
+                const eventSource = new EventSource(`/ai-progress/${trackerId}`);
+
+                eventSource.onmessage = (event) => {
+                    const data = JSON.parse(event.data);
+
+                    if (data.connected) {
+                        progressStatus.textContent = 'Connected! Starting generation...';
+                        return;
+                    }
+
+                    if (data.done) {
+                        eventSource.close();
+                        progressStatus.textContent = 'Complete! Redirecting...';
+                        progressBar.style.width = '100%';
+                        progressBar.textContent = '100%';
+                    } else {
+                        const percent = Math.round((data.completed / data.total) * 100);
+                        progressBar.style.width = percent + '%';
+                        progressBar.textContent = percent + '%';
+                        progressStatus.textContent = `Processing ${data.completed} of ${data.total} items`;
+                        progressCurrentItem.textContent = data.current;
+                    }
+                };
+
+                eventSource.onerror = (error) => {
+                    console.error('SSE connection error:', error);
+                    eventSource.close();
+                };
+
+                // Submit form via fetch (keeps page active for SSE)
+                setTimeout(() => {
+                    const formData = new FormData(generateForm);
+                    formData.append('tracker_id', trackerId);
+
+                    fetch('/', {
+                        method: 'POST',
+                        body: formData
+                    })
+                    .then(response => response.text())
+                    .then(html => {
+                        // Replace entire document with response
+                        document.open();
+                        document.write(html);
+                        document.close();
+                    })
+                    .catch(error => {
+                        console.error('Error:', error);
+                        progressOverlay.classList.remove('active');
+                        alert('Error uploading file. Please try again.');
+                    });
+                }, 500); // Wait for SSE to be ready
+
+            } catch (error) {
+                console.error('Error creating tracker:', error);
+                progressOverlay.classList.remove('active');
+                alert('Error initializing progress tracker.');
+            }
+        }
+
+        function generateUUID() {
+            return 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, function(c) {
+                const r = Math.random() * 16 | 0;
+                const v = c == 'x' ? r : (r & 0x3 | 0x8);
+                return v.toString(16);
+            });
+        }
+
+        // Check AI server status on page load
+        const aiStatus = document.getElementById('aiStatus');
+        if (aiStatus) {
+            fetch('/test-llm', { method: 'POST' })
+                .then(response => response.json())
+                .then(data => {
+                    console.log('='.repeat(60));
+                    console.log('AI Configuration:');
+                    console.log('  Provider:', data.provider);
+                    console.log('  Model:', data.model);
+                    console.log('  Base URL:', data.base_url);
+                    console.log('  Status:', data.success ? 'Online' : 'Offline');
+                    console.log('='.repeat(60));
+
+                    if (data.success) {
+                        aiStatus.innerHTML = `✓ AI server online: ${data.provider} (${data.model})`;
+                    } else {
+                        aiStatus.innerHTML = '✗ AI server offline: ' + data.message;
+                        aiStatus.style.color = 'rgba(255,200,200,0.9)';
+                    }
+                })
+                .catch(error => {
+                    console.error('AI test failed:', error);
+                    aiStatus.innerHTML = '✗ AI server offline';
+                    aiStatus.style.color = 'rgba(255,200,200,0.9)';
+                });
+        }
+
+        // Clear AI cache button
+        const clearCacheBtn = document.getElementById('clearCacheBtn');
+        const cacheStatus = document.getElementById('cacheStatus');
+        if (clearCacheBtn) {
+            clearCacheBtn.addEventListener('click', () => {
+                if (!confirm('Clear all cached AI summaries? This cannot be undone.')) {
+                    return;
+                }
+
+                clearCacheBtn.disabled = true;
+                clearCacheBtn.textContent = 'Clearing...';
+
+                fetch('/clear-ai-cache', { method: 'POST' })
+                    .then(response => response.json())
+                    .then(data => {
+                        if (data.success) {
+                            cacheStatus.innerHTML = `✓ ${data.message}`;
+                            cacheStatus.style.color = 'rgba(144,238,144,1)';
+                        } else {
+                            cacheStatus.innerHTML = `✗ ${data.message}`;
+                            cacheStatus.style.color = 'rgba(255,200,200,0.9)';
+                        }
+                        cacheStatus.style.display = 'block';
+
+                        setTimeout(() => {
+                            cacheStatus.style.display = 'none';
+                        }, 5000);
+                    })
+                    .catch(error => {
+                        cacheStatus.innerHTML = '✗ Failed to clear cache';
+                        cacheStatus.style.color = 'rgba(255,200,200,0.9)';
+                        cacheStatus.style.display = 'block';
+                    })
+                    .finally(() => {
+                        clearCacheBtn.disabled = false;
+                        clearCacheBtn.textContent = '🗑️ Clear AI Cache';
+                    });
+            });
+        }
 
         // Compare mode file handling
         const uploadAreaA = document.getElementById('uploadAreaA');
@@ -665,28 +1004,170 @@ COMPARE_RESULT_PAGE = """
 </html>
 """
 
-# Store the last generated HTML for download
-_last_generated_html = None
-_last_generated_title = "documentation"
-_last_diff_html = None
-_last_diff_title = "comparison"
+# Helper functions for storing generated HTML in temporary files
+def save_html_to_temp(html_content: str, title: str) -> str:
+    """Save HTML to temporary file and return file ID."""
+    file_id = str(uuid.uuid4())
+    temp_dir = Path(tempfile.gettempdir()) / 'therefore-processor'
+    temp_dir.mkdir(exist_ok=True)
+
+    temp_file = temp_dir / f"{file_id}.html"
+    temp_file.write_text(html_content, encoding='utf-8')
+
+    # Store metadata in session
+    session[f'{file_id}_title'] = title
+
+    return file_id
+
+def get_html_from_temp(file_id: str) -> tuple:
+    """Retrieve HTML from temporary file."""
+    temp_dir = Path(tempfile.gettempdir()) / 'therefore-processor'
+    temp_file = temp_dir / f"{file_id}.html"
+
+    if temp_file.exists():
+        html_content = temp_file.read_text(encoding='utf-8')
+        title = session.get(f'{file_id}_title', 'documentation')
+        return html_content, title
+    return None, None
+
+
+@app.route('/create-tracker/<tracker_id>', methods=['POST'])
+def create_tracker(tracker_id):
+    """Create a progress tracker before starting generation."""
+    progress_tracker.create_tracker(tracker_id)
+    return jsonify({'success': True, 'tracker_id': tracker_id})
+
+
+@app.route('/ai-progress/<tracker_id>')
+def ai_progress(tracker_id):
+    """Stream AI generation progress via Server-Sent Events."""
+    def generate():
+        # Send initial connection confirmation
+        yield f"data: {json.dumps({'connected': True})}\n\n"
+
+        for update in progress_tracker.get_updates(tracker_id):
+            if update.get('done'):
+                yield f"data: {json.dumps({'done': True})}\n\n"
+                break
+            else:
+                yield f"data: {json.dumps(update)}\n\n"
+
+    return Response(stream_with_context(generate()), mimetype='text/event-stream')
+
+
+@app.route('/clear-ai-cache', methods=['POST'])
+def clear_ai_cache():
+    """Clear all cached AI summaries."""
+    if not AI_AVAILABLE:
+        return jsonify({'success': False, 'message': 'AI module not available'})
+
+    try:
+        from .ai.summary_generator import AISummaryGenerator
+        count = AISummaryGenerator.clear_cache()
+        return jsonify({
+            'success': True,
+            'message': f'Cleared {count} cached summary file(s)',
+            'count': count
+        })
+    except Exception as e:
+        return jsonify({'success': False, 'message': f'Error: {str(e)}'})
+
+
+@app.route('/test-llm', methods=['POST'])
+def test_llm():
+    """Test connection to all configured LLMs."""
+    if not AI_CONFIGURED:
+        return jsonify({
+            'success': False,
+            'message': 'AI not configured. Set LLM_1_BASE_URL and LLM_1_MODEL_NAME environment variables.'
+        })
+
+    try:
+        print("=" * 60)
+        print("Testing AI LLM Configurations:")
+        print("=" * 60)
+
+        llm_status = []
+        at_least_one_working = False
+
+        for i, config in enumerate(LLM_CONFIGS, 1):
+            # Detect provider from base URL
+            provider = "Unknown"
+            if "azure.com" in config.base_url.lower():
+                provider = "Azure OpenAI"
+            elif "11434" in config.base_url or "ollama" in config.base_url.lower():
+                provider = "Ollama"
+            elif "localhost" in config.base_url or "127.0.0.1" in config.base_url:
+                provider = "Local LLM"
+            else:
+                provider = f"Custom ({config.base_url.split('/')[2]})"
+
+            print(f"\nLLM #{i} ({provider}):")
+            print(f"  Base URL: {config.base_url}")
+            print(f"  Model: {config.model_name}")
+            print(f"  API Key: {'*' * 10 if config.api_key != 'not-needed' else 'not-needed'}")
+
+            # Test connection
+            from .ai.summary_generator import AISummaryGenerator
+            generator = AISummaryGenerator(config)
+            success, message = generator.test_connection()
+
+            print(f"  Status: {'✓ Online' if success else '✗ Offline - ' + message}")
+
+            llm_status.append({
+                'priority': i,
+                'provider': provider,
+                'model': config.model_name,
+                'base_url': config.base_url,
+                'success': success,
+                'message': message if not success else 'Online'
+            })
+
+            if success:
+                at_least_one_working = True
+
+        print("=" * 60)
+
+        # Build response message
+        if at_least_one_working:
+            working_llms = [s for s in llm_status if s['success']]
+            primary = working_llms[0]
+            message = f"{primary['provider']} ({primary['model']})"
+            if len(working_llms) > 1:
+                message += f" + {len(working_llms) - 1} fallback(s)"
+        else:
+            message = "All LLMs offline"
+
+        return jsonify({
+            'success': at_least_one_working,
+            'message': message,
+            'llms': llm_status,
+            'provider': llm_status[0]['provider'] if llm_status else 'None',
+            'model': llm_status[0]['model'] if llm_status else 'None',
+            'base_url': llm_status[0]['base_url'] if llm_status else 'None'
+        })
+
+    except Exception as e:
+        print(f"AI test error: {str(e)}")
+        return jsonify({'success': False, 'message': f'Error: {str(e)}'})
 
 
 @app.route('/', methods=['GET', 'POST'])
 def upload():
     """Handle file upload and display results."""
-    global _last_generated_html, _last_generated_title
-
     if request.method == 'POST':
         if 'file' not in request.files:
-            return render_template_string(UPLOAD_PAGE, error="No file selected", version=__version__)
+            return render_template_string(UPLOAD_PAGE, error="No file selected", version=__version__,
+                                        ai_configured=AI_CONFIGURED)
 
         file = request.files['file']
         if file.filename == '':
-            return render_template_string(UPLOAD_PAGE, error="No file selected", version=__version__)
+            return render_template_string(UPLOAD_PAGE, error="No file selected", version=__version__,
+                                        ai_configured=AI_CONFIGURED)
 
         if not file.filename.lower().endswith('.xml'):
-            return render_template_string(UPLOAD_PAGE, error="Please upload an XML file", version=__version__)
+            return render_template_string(UPLOAD_PAGE, error="Please upload an XML file", version=__version__,
+                                        ai_configured=AI_CONFIGURED)
 
         try:
             # Parse the XML
@@ -694,14 +1175,71 @@ def upload():
             parser = ConfigurationParser()
             config = parser.parse_string(xml_content)
 
+            # Check if AI summaries are requested
+            ai_summaries = None
+            tracker_id = request.form.get('tracker_id')  # Get tracker ID from form
+            if request.form.get('with_ai') == 'on' and AI_CONFIGURED:
+                try:
+                    ai_generator = AISummaryGenerator(LLM_CONFIGS)
+
+                    # Try to load from cache first
+                    ai_summaries = ai_generator.load_from_cache(xml_content)
+
+                    if ai_summaries:
+                        print("  Skipping generation - using cached summaries")
+                    else:
+                        # Cache miss - generate new summaries in parallel
+                        if not tracker_id:
+                            tracker_id = str(uuid.uuid4())
+                            progress_tracker.create_tracker(tracker_id)
+                        # Tracker already created by /create-tracker endpoint
+
+                        print("=" * 60)
+                        print(f"Generating AI summaries (parallel) with {len(LLM_CONFIGS)} configured LLM(s)")
+                        for i, llm_config in enumerate(LLM_CONFIGS, 1):
+                            provider = "Azure OpenAI" if "azure.com" in llm_config.base_url.lower() else \
+                                       "Ollama" if "11434" in llm_config.base_url else "Local LLM"
+                            print(f"  {i}. {provider} ({llm_config.model_name})")
+                        print("=" * 60)
+
+                        def progress_callback(completed, total, current):
+                            progress_tracker.update(tracker_id, completed, total, current)
+                            print(f"  Progress: {completed}/{total} - {current}")
+
+                        # Use parallel generation
+                        ai_summaries = ai_generator.generate_all_summaries_parallel(
+                            config,
+                            progress_callback=progress_callback,
+                            max_workers=3
+                        )
+
+                        progress_tracker.mark_done(tracker_id)
+
+                        # Save to cache
+                        if ai_summaries:
+                            ai_generator.save_to_cache(xml_content, ai_summaries)
+
+                        print(f"✓ AI summary generation completed")
+                except Exception as e:
+                    # Log error but continue without summaries
+                    print(f"✗ AI summary generation failed: {e}")
+                    if tracker_id:
+                        progress_tracker.mark_done(tracker_id)
+                    ai_summaries = None
+
+            # Store tracker ID in session if progress was tracked
+            if tracker_id:
+                session['last_tracker_id'] = tracker_id
+
             # Generate HTML
             title = file.filename.replace('.xml', '').replace('_', ' ').title()
-            generator = HTMLGenerator(config, title=title)
+            generator = HTMLGenerator(config, title=title, ai_summaries=ai_summaries)
             html_content = generator.generate_string()
 
-            # Store for download
-            _last_generated_html = html_content
-            _last_generated_title = file.filename.replace('.xml', '')
+            # Store in temp file and save ID in session
+            title = file.filename.replace('.xml', '')
+            file_id = save_html_to_temp(html_content, title)
+            session['generated_file_id'] = file_id
 
             # Get stats for display
             stats_dict = config.get_statistics()
@@ -719,16 +1257,16 @@ def upload():
             return render_template_string(RESULT_PAGE, title=title, stats=stats, version=__version__)
 
         except Exception as e:
-            return render_template_string(UPLOAD_PAGE, error=f"Error processing file: {str(e)}", version=__version__)
+            return render_template_string(UPLOAD_PAGE, error=f"Error processing file: {str(e)}", version=__version__,
+                                        ai_configured=AI_CONFIGURED)
 
-    return render_template_string(UPLOAD_PAGE, error=None, version=__version__)
+    return render_template_string(UPLOAD_PAGE, error=None, version=__version__,
+                                ai_configured=AI_CONFIGURED)
 
 
 @app.route('/compare', methods=['POST'])
 def compare():
     """Handle comparison of two configuration files."""
-    global _last_diff_html, _last_diff_title
-
     # Check for both files
     if 'file_a' not in request.files or 'file_b' not in request.files:
         return render_template_string(UPLOAD_PAGE, error="Please upload both configuration files", version=__version__)
@@ -764,9 +1302,10 @@ def compare():
         diff_generator = DiffHTMLGenerator(diff_result)
         diff_html = diff_generator.generate()
 
-        # Store for download
-        _last_diff_html = diff_html
-        _last_diff_title = f"comparison_{file_a.filename.replace('.xml', '')}_vs_{file_b.filename.replace('.xml', '')}"
+        # Store in temp file and save ID in session
+        diff_title = f"comparison_{file_a.filename.replace('.xml', '')}_vs_{file_b.filename.replace('.xml', '')}"
+        diff_file_id = save_html_to_temp(diff_html, diff_title)
+        session['diff_file_id'] = diff_file_id
 
         # Calculate summary stats
         total_added = sum(s.added for s in diff_result.summary.values())
@@ -790,55 +1329,63 @@ def compare():
 @app.route('/preview')
 def preview():
     """Return the generated HTML for iframe preview."""
-    global _last_generated_html
-    if _last_generated_html:
-        return Response(_last_generated_html, mimetype='text/html')
+    file_id = session.get('generated_file_id')
+    if file_id:
+        html_content, _ = get_html_from_temp(file_id)
+        if html_content:
+            return Response(html_content, mimetype='text/html')
     return "No documentation generated yet", 404
 
 
 @app.route('/preview-diff')
 def preview_diff():
     """Return the generated diff HTML for iframe preview."""
-    global _last_diff_html
-    if _last_diff_html:
-        return Response(_last_diff_html, mimetype='text/html')
+    file_id = session.get('diff_file_id')
+    if file_id:
+        html_content, _ = get_html_from_temp(file_id)
+        if html_content:
+            return Response(html_content, mimetype='text/html')
     return "No comparison generated yet", 404
 
 
 @app.route('/download')
 def download():
     """Download the generated HTML file."""
-    global _last_generated_html, _last_generated_title
-    if _last_generated_html:
-        from datetime import datetime
-        # Add timestamp to filename
-        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-        filename = f"{_last_generated_title}_documentation_{timestamp}.html"
-        buffer = BytesIO(_last_generated_html.encode('utf-8'))
-        return send_file(
-            buffer,
-            mimetype='text/html',
-            as_attachment=True,
-            download_name=filename
-        )
+    file_id = session.get('generated_file_id')
+    if file_id:
+        html_content, title = get_html_from_temp(file_id)
+        if html_content:
+            from datetime import datetime
+            # Add timestamp to filename
+            timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+            filename = f"{title}_documentation_{timestamp}.html"
+            buffer = BytesIO(html_content.encode('utf-8'))
+            return send_file(
+                buffer,
+                mimetype='text/html',
+                as_attachment=True,
+                download_name=filename
+            )
     return "No documentation generated yet", 404
 
 
 @app.route('/download-diff')
 def download_diff():
     """Download the generated diff HTML file."""
-    global _last_diff_html, _last_diff_title
-    if _last_diff_html:
-        from datetime import datetime
-        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-        filename = f"{_last_diff_title}_{timestamp}.html"
-        buffer = BytesIO(_last_diff_html.encode('utf-8'))
-        return send_file(
-            buffer,
-            mimetype='text/html',
-            as_attachment=True,
-            download_name=filename
-        )
+    file_id = session.get('diff_file_id')
+    if file_id:
+        html_content, title = get_html_from_temp(file_id)
+        if html_content:
+            from datetime import datetime
+            timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+            filename = f"{title}_{timestamp}.html"
+            buffer = BytesIO(html_content.encode('utf-8'))
+            return send_file(
+                buffer,
+                mimetype='text/html',
+                as_attachment=True,
+                download_name=filename
+            )
     return "No comparison generated yet", 404
 
 
