@@ -94,6 +94,7 @@ class HTMLGenerator:
         parts.append(self._generate_datatypes_section())
         parts.append(self._generate_stamps_section())
         parts.append(self._generate_retention_policies_section())
+        parts.append(self._generate_customisations_section())
         parts.append('</main>')
 
         parts.append('</div>')  # Close layout
@@ -235,6 +236,51 @@ class HTMLGenerator:
                 nav_sections.insert(users_insert_index, users_section)
             else:
                 nav_sections.append(users_section)
+
+        # Add Customisations section at the end
+        # Count customizations to determine if we should show this section
+        customisations_count = 0
+        for workflow in self.config.workflows:
+            for task in workflow.tasks:
+                if task.init_script:
+                    customisations_count += 1
+                customisations_count += len(task.rest_calls)
+                for trans in task.transitions:
+                    if trans.condition:
+                        customisations_count += 1
+
+        for eform in self.config.eforms:
+            def count_component_scripts(comp):
+                count = 0
+                if comp.custom_default_value:
+                    count += 1
+                if comp.calculate_value:
+                    count += 1
+                if comp.validate_custom:
+                    count += 1
+                if comp.custom_conditional:
+                    count += 1
+                if comp.conditional_show and not comp.custom_conditional:
+                    count += 1
+                for child in comp.children:
+                    count += count_component_scripts(child)
+                return count
+
+            for component in eform.components:
+                customisations_count += count_component_scripts(component)
+
+        if customisations_count > 0:
+            # Create a direct link for Customisations (not a collapsible section)
+            # Using a custom class to avoid JavaScript toggle interference
+            customisations_section = f'''
+<div class="nav-section">
+    <a href="#customisations" class="nav-section-link" style="display: flex; align-items: center; padding: 0.5rem 1rem; font-weight: 600; font-size: 0.875rem; color: var(--text-color); text-decoration: none; transition: background 0.2s; cursor: pointer;">
+        <span style="flex: 1;">Customisations</span>
+        <span class="count" style="margin-left: auto; font-size: 0.75rem; color: var(--text-muted); background: var(--bg-color); padding: 0.125rem 0.375rem; border-radius: 10px;">{customisations_count}</span>
+    </a>
+</div>
+'''
+            nav_sections.append(customisations_section)
 
         return SIDEBAR_TEMPLATE.format(nav_sections='\n'.join(nav_sections))
 
@@ -2543,6 +2589,192 @@ class HTMLGenerator:
             </div>
         </div>
         '''
+
+    def _generate_customisations_section(self) -> str:
+        """Generate the customisations section showing all scripts, REST calls, and special conditions."""
+        customisations = []
+
+        # Collect workflow task init scripts
+        for workflow in self.config.workflows:
+            workflow_slug = slugify(workflow.name) or str(abs(workflow.process_no))
+            for task in workflow.tasks:
+                task_slug = slugify(task.name) or str(abs(task.task_no))
+
+                # Init scripts
+                if task.init_script:
+                    customisations.append({
+                        'type': 'Workflow Task Script',
+                        'name': f"{workflow.name} - {task.name}",
+                        'description': 'Initialization Script',
+                        'code': task.init_script,
+                        'link': f"#workflow-{workflow_slug}",
+                        'link_text': f"{workflow.name} \u2192 {task.name}"
+                    })
+
+                # REST service calls
+                for call in task.rest_calls:
+                    call_name = call.call_name or call.call_id or "REST Call"
+                    code_parts = []
+                    code_parts.append(f"{call.http_method} {call.url}")
+                    if call.body_params:
+                        code_parts.append("\nBody Parameters:")
+                        for param in call.body_params:
+                            code_parts.append(f"  {param.get('key', '')}: {param.get('value', '')}")
+                    if call.response_script:
+                        code_parts.append(f"\nResponse Script:\n{call.response_script}")
+
+                    customisations.append({
+                        'type': 'REST Service Call',
+                        'name': f"{workflow.name} - {task.name}",
+                        'description': call_name,
+                        'code': '\n'.join(code_parts),
+                        'link': f"#workflow-{workflow_slug}",
+                        'link_text': f"{workflow.name} \u2192 {task.name}"
+                    })
+
+                # Transition conditions
+                for trans in task.transitions:
+                    if trans.condition:
+                        trans_name = trans.action_text or trans.name or "Transition"
+                        customisations.append({
+                            'type': 'Workflow Transition Condition',
+                            'name': f"{workflow.name} - {task.name}",
+                            'description': f"Transition: {trans_name}",
+                            'code': trans.condition,
+                            'link': f"#workflow-{workflow_slug}",
+                            'link_text': f"{workflow.name} \u2192 {task.name} \u2192 {trans_name}"
+                        })
+
+        # Collect eForm component scripts
+        for eform in self.config.eforms:
+            eform_slug = slugify(eform.name) or str(abs(eform.form_no))
+
+            def process_component(comp, parent_path=""):
+                comp_path = f"{parent_path} \u2192 {comp.label}" if parent_path else comp.label
+
+                # Custom default value
+                if comp.custom_default_value:
+                    customisations.append({
+                        'type': 'EForm Script',
+                        'name': eform.name,
+                        'description': f"{comp_path} - Custom Default Value",
+                        'code': comp.custom_default_value,
+                        'link': f"#eform-{eform_slug}",
+                        'link_text': f"{eform.name} \u2192 {comp.label}"
+                    })
+
+                # Calculate value
+                if comp.calculate_value:
+                    customisations.append({
+                        'type': 'EForm Script',
+                        'name': eform.name,
+                        'description': f"{comp_path} - Calculate Value",
+                        'code': comp.calculate_value,
+                        'link': f"#eform-{eform_slug}",
+                        'link_text': f"{eform.name} \u2192 {comp.label}"
+                    })
+
+                # Custom validation
+                if comp.validate_custom:
+                    customisations.append({
+                        'type': 'EForm Script',
+                        'name': eform.name,
+                        'description': f"{comp_path} - Custom Validation",
+                        'code': comp.validate_custom,
+                        'link': f"#eform-{eform_slug}",
+                        'link_text': f"{eform.name} \u2192 {comp.label}"
+                    })
+
+                # Custom conditional
+                if comp.custom_conditional:
+                    customisations.append({
+                        'type': 'EForm Script',
+                        'name': eform.name,
+                        'description': f"{comp_path} - Custom Conditional",
+                        'code': comp.custom_conditional,
+                        'link': f"#eform-{eform_slug}",
+                        'link_text': f"{eform.name} \u2192 {comp.label}"
+                    })
+
+                # Conditional show/when (if not using custom_conditional)
+                if comp.conditional_show and not comp.custom_conditional:
+                    customisations.append({
+                        'type': 'EForm Script',
+                        'name': eform.name,
+                        'description': f"{comp_path} - Conditional Display",
+                        'code': f"Show: {comp.conditional_show}\nWhen: {comp.conditional_when or 'N/A'}",
+                        'link': f"#eform-{eform_slug}",
+                        'link_text': f"{eform.name} \u2192 {comp.label}"
+                    })
+
+                # Process children recursively
+                for child in comp.children:
+                    process_component(child, comp_path)
+
+            for component in eform.components:
+                process_component(component)
+
+        # If no customisations found, return empty string
+        if not customisations:
+            return ""
+
+        # Build the HTML
+        items = []
+
+        # Group by type
+        grouped = {}
+        for custom in customisations:
+            type_key = custom['type']
+            if type_key not in grouped:
+                grouped[type_key] = []
+            grouped[type_key].append(custom)
+
+        # Render each group
+        for type_name in sorted(grouped.keys()):
+            group_items = grouped[type_name]
+            group_html = f'<h3 style="margin-top: 1.5rem; color: var(--primary);">{escape_html(type_name)}s ({len(group_items)})</h3>'
+
+            for custom in group_items:
+                # Resolve field macros in the code
+                code_with_macros = custom['code']
+                code_resolved = self.config.resolve_field_macros(code_with_macros)
+
+                # Truncate code preview if too long
+                code_preview = code_resolved
+                is_truncated = False
+                if len(code_preview) > 500:
+                    code_preview = code_preview[:500] + '...'
+                    is_truncated = True
+
+                group_html += f'''
+                <div class="card" style="margin-bottom: 1rem;">
+                    <div class="card-header" style="padding: 0.75rem 1rem;">
+                        <h4 style="margin: 0; font-size: 1rem;">
+                            <a href="{custom['link']}" style="color: var(--primary); text-decoration: none;">
+                                {escape_html(custom['link_text'])}
+                            </a>
+                        </h4>
+                        <div style="font-size: 0.875rem; color: var(--text-muted); margin-top: 0.25rem;">
+                            {escape_html(custom['description'])}
+                        </div>
+                    </div>
+                    <div class="card-body" style="padding: 0.75rem 1rem;">
+                        <div class="script-block" style="font-size: 0.875rem; max-height: 300px; overflow-y: auto;">
+                            {escape_html(code_preview)}
+                        </div>
+                        {'<div style="font-size: 0.75rem; color: var(--text-muted); margin-top: 0.5rem; font-style: italic;">Code preview truncated. See full details in the linked section.</div>' if is_truncated else ''}
+                    </div>
+                </div>
+                '''
+
+            items.append(group_html)
+
+        return SECTION_TEMPLATE.format(
+            id="customisations",
+            title="Customisations",
+            count=len(customisations),
+            content='\n'.join(items)
+        )
 
     def _get_item_id(self, section_id: str, item) -> str:
         """Get the HTML ID for an item."""

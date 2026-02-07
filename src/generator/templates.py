@@ -362,6 +362,10 @@ body {
     padding-left: 1.5rem;
 }
 
+.nav-section-link:hover {
+    background: var(--bg-color);
+}
+
 .nav-item {
     display: block;
     padding: 0.375rem 1rem;
@@ -1082,25 +1086,6 @@ a:hover {
 .back-to-top:hover {
     background: var(--primary-hover);
     text-decoration: none;
-}
-
-/* App Footer */
-.app-footer {
-    position: fixed;
-    bottom: 0;
-    left: 0;
-    right: 0;
-    background: var(--bg-color);
-    border-top: 1px solid var(--border-color);
-    padding: 0.25rem 1rem;
-    text-align: right;
-    z-index: 999;
-}
-
-.version-info {
-    font-size: 0.7rem;
-    color: var(--text-muted);
-    opacity: 0.6;
 }
 
 /* Workflow Task Details */
@@ -1890,9 +1875,6 @@ HTML_HEAD = """<!DOCTYPE html>
 
 HTML_FOOTER = """
     <a href="#top" id="back-to-top" class="back-to-top" title="Back to top">&#8593;</a>
-    <footer class="app-footer">
-        <span class="version-info">Therefore Config Processor v{app_version}</span>
-    </footer>
     <script src="https://cdn.jsdelivr.net/npm/mermaid@10/dist/mermaid.min.js"></script>
     <script src="https://cdn.jsdelivr.net/npm/svg-pan-zoom@3.6.1/dist/svg-pan-zoom.min.js"></script>
     <script>
