@@ -240,15 +240,28 @@ class HTMLGenerator:
         # Add Customisations section at the end
         customisations = self._collect_customisations()
         if customisations:
-            nav_items = []
-            for custom in customisations[:50]:  # Limit to 50 items
-                nav_items.append(NAV_ITEM_TEMPLATE.format(
-                    id=custom['id'],
-                    name=escape_html(custom['nav_name'][:40])
-                ))
+            # Group by parent object (workflow/eform name)
+            grouped = {}
+            for custom in customisations:
+                parent_name = custom['name']
+                if parent_name not in grouped:
+                    grouped[parent_name] = {
+                        'count': 0,
+                        'first_id': custom['id'],
+                        'type': custom['type']
+                    }
+                grouped[parent_name]['count'] += 1
             
-            if len(customisations) > 50:
-                nav_items.append(f'<span class="nav-item" style="color: var(--text-muted);">... and {len(customisations) - 50} more</span>')
+            nav_items = []
+            for parent_name in sorted(grouped.keys()):
+                group = grouped[parent_name]
+                # Use the first item's ID as the anchor
+                display_name = parent_name[:40] if len(parent_name) <= 40 else parent_name[:37] + '...'
+                count_suffix = f" ({group['count']})" if group['count'] > 1 else ""
+                nav_items.append(NAV_ITEM_TEMPLATE.format(
+                    id=group['first_id'],
+                    name=escape_html(display_name + count_suffix)
+                ))
             
             customisations_section = NAV_SECTION_TEMPLATE.format(
                 title="Customisations",
