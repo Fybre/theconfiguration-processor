@@ -2732,6 +2732,57 @@ class HTMLGenerator:
                         'link_text': f"{eform.name} \u2192 {comp.label}"
                     })
 
+                # Logic rules (JavaScript triggers and actions)
+                if comp.logic:
+                    for logic_rule in comp.logic:
+                        if not isinstance(logic_rule, dict):
+                            continue
+                        
+                        rule_name = logic_rule.get("name", "Unnamed")
+                        trigger = logic_rule.get("trigger", {})
+                        trigger_type = trigger.get("type", "unknown") if isinstance(trigger, dict) else "unknown"
+                        
+                        # Extract trigger JavaScript if present
+                        trigger_code = ""
+                        if isinstance(trigger, dict):
+                            if trigger_type == "javascript":
+                                trigger_code = trigger.get("javascript", "")
+                            elif trigger_type == "json":
+                                trigger_code = trigger.get("json", "")
+                        
+                        # Extract action values (may contain JavaScript)
+                        actions_code = []
+                        actions = logic_rule.get("actions", [])
+                        for action in actions:
+                            if not isinstance(action, dict):
+                                continue
+                            action_name = action.get("name", "Unnamed")
+                            action_type = action.get("type", "unknown")
+                            action_value = action.get("value", "")
+                            if action_value and isinstance(action_value, str):
+                                actions_code.append(f"// Action: {action_name} ({action_type})\n{action_value}")
+                        
+                        # Only add if there's JavaScript code
+                        if trigger_code or actions_code:
+                            counter += 1
+                            code_parts = []
+                            if trigger_code:
+                                code_parts.append(f"// Trigger ({trigger_type})\n{trigger_code}")
+                            if actions_code:
+                                code_parts.extend(actions_code)
+                            
+                            customisations.append({
+                                'id': f"custom-{counter}",
+                                'nav_name': f"{eform.name} - {comp.label} - {rule_name}",
+                                'group_name': eform.name,
+                                'type': 'EForm Logic Rule',
+                                'name': eform.name,
+                                'description': f"{comp_path} - Logic: {rule_name}",
+                                'code': '\n\n'.join(code_parts),
+                                'link': f"#eform-{eform_slug}",
+                                'link_text': f"{eform.name} \u2192 {comp.label}"
+                            })
+
                 # Process children recursively
                 for child in comp.children:
                     process_component(child, comp_path)
