@@ -252,7 +252,7 @@ class HTMLGenerator:
                 grouped[group_name]['count'] += 1
             
             nav_items = []
-            for group_name in sorted(grouped.keys()):
+            for group_name in sorted(grouped.keys(), key=str.lower):
                 group = grouped[group_name]
                 # Use the first item's ID as the anchor
                 display_name = group_name[:40] if len(group_name) <= 40 else group_name[:37] + '...'
