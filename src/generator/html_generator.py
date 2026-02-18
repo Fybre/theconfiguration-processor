@@ -2739,13 +2739,6 @@ class HTMLGenerator:
                 code_with_macros = custom['code']
                 code_resolved = self.config.resolve_field_macros(code_with_macros)
 
-                # Truncate code preview if too long
-                code_preview = code_resolved
-                is_truncated = False
-                if len(code_preview) > 500:
-                    code_preview = code_preview[:500] + '...'
-                    is_truncated = True
-
                 group_html += f'''
                 <div class="card" style="margin-bottom: 1rem;">
                     <div class="card-header" style="padding: 0.75rem 1rem;">
@@ -2759,10 +2752,9 @@ class HTMLGenerator:
                         </div>
                     </div>
                     <div class="card-body" style="padding: 0.75rem 1rem;">
-                        <div class="script-block" style="font-size: 0.875rem; max-height: 300px; overflow-y: auto;">
-                            {escape_html(code_preview)}
+                        <div class="script-block" style="font-size: 0.875rem; max-height: 500px; overflow-y: auto;">
+                            {escape_html(code_resolved)}
                         </div>
-                        {'<div style="font-size: 0.75rem; color: var(--text-muted); margin-top: 0.5rem; font-style: italic;">Code preview truncated. See full details in the linked section.</div>' if is_truncated else ''}
                     </div>
                 </div>
                 '''
