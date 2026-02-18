@@ -238,48 +238,23 @@ class HTMLGenerator:
                 nav_sections.append(users_section)
 
         # Add Customisations section at the end
-        # Count customizations to determine if we should show this section
-        customisations_count = 0
-        for workflow in self.config.workflows:
-            for task in workflow.tasks:
-                if task.init_script:
-                    customisations_count += 1
-                customisations_count += len(task.rest_calls)
-                for trans in task.transitions:
-                    if trans.condition:
-                        customisations_count += 1
-
-        for eform in self.config.eforms:
-            def count_component_scripts(comp):
-                count = 0
-                if comp.custom_default_value:
-                    count += 1
-                if comp.calculate_value:
-                    count += 1
-                if comp.validate_custom:
-                    count += 1
-                if comp.custom_conditional:
-                    count += 1
-                if comp.conditional_show and not comp.custom_conditional:
-                    count += 1
-                for child in comp.children:
-                    count += count_component_scripts(child)
-                return count
-
-            for component in eform.components:
-                customisations_count += count_component_scripts(component)
-
-        if customisations_count > 0:
-            # Create a direct link for Customisations (not a collapsible section)
-            # Using a custom class to avoid JavaScript toggle interference
-            customisations_section = f'''
-<div class="nav-section">
-    <a href="#customisations" class="nav-section-link" style="display: flex; align-items: center; padding: 0.5rem 1rem; font-weight: 600; font-size: 0.875rem; color: var(--text-color); text-decoration: none; transition: background 0.2s; cursor: pointer;">
-        <span style="flex: 1;">Customisations</span>
-        <span class="count" style="margin-left: auto; font-size: 0.75rem; color: var(--text-muted); background: var(--bg-color); padding: 0.125rem 0.375rem; border-radius: 10px;">{customisations_count}</span>
-    </a>
-</div>
-'''
+        customisations = self._collect_customisations()
+        if customisations:
+            nav_items = []
+            for custom in customisations[:50]:  # Limit to 50 items
+                nav_items.append(NAV_ITEM_TEMPLATE.format(
+                    id=custom['id'],
+                    name=escape_html(custom['nav_name'][:40])
+                ))
+            
+            if len(customisations) > 50:
+                nav_items.append(f'<span class="nav-item" style="color: var(--text-muted);">... and {len(customisations) - 50} more</span>')
+            
+            customisations_section = NAV_SECTION_TEMPLATE.format(
+                title="Customisations",
+                count=len(customisations),
+                items='\n'.join(nav_items)
+            )
             nav_sections.append(customisations_section)
 
         return SIDEBAR_TEMPLATE.format(nav_sections='\n'.join(nav_sections))
@@ -2590,9 +2565,14 @@ class HTMLGenerator:
         </div>
         '''
 
-    def _generate_customisations_section(self) -> str:
-        """Generate the customisations section showing all scripts, REST calls, and special conditions."""
+    def _collect_customisations(self) -> List[Dict]:
+        """Collect all customisations with unique IDs for navigation.
+        
+        Returns:
+            List of customisation dicts with 'id', 'nav_name', 'type', etc.
+        """
         customisations = []
+        counter = 0
 
         # Collect workflow task init scripts
         for workflow in self.config.workflows:
@@ -2602,7 +2582,10 @@ class HTMLGenerator:
 
                 # Init scripts
                 if task.init_script:
+                    counter += 1
                     customisations.append({
+                        'id': f"custom-{counter}",
+                        'nav_name': f"{workflow.name} - {task.name} (Script)",
                         'type': 'Workflow Task Script',
                         'name': f"{workflow.name} - {task.name}",
                         'description': 'Initialization Script',
@@ -2613,6 +2596,7 @@ class HTMLGenerator:
 
                 # REST service calls
                 for call in task.rest_calls:
+                    counter += 1
                     call_name = call.call_name or call.call_id or "REST Call"
                     code_parts = []
                     code_parts.append(f"{call.http_method} {call.url}")
@@ -2624,6 +2608,8 @@ class HTMLGenerator:
                         code_parts.append(f"\nResponse Script:\n{call.response_script}")
 
                     customisations.append({
+                        'id': f"custom-{counter}",
+                        'nav_name': f"{workflow.name} - {call_name}",
                         'type': 'REST Service Call',
                         'name': f"{workflow.name} - {task.name}",
                         'description': call_name,
@@ -2635,8 +2621,11 @@ class HTMLGenerator:
                 # Transition conditions
                 for trans in task.transitions:
                     if trans.condition:
+                        counter += 1
                         trans_name = trans.action_text or trans.name or "Transition"
                         customisations.append({
+                            'id': f"custom-{counter}",
+                            'nav_name': f"{workflow.name} - {trans_name}",
                             'type': 'Workflow Transition Condition',
                             'name': f"{workflow.name} - {task.name}",
                             'description': f"Transition: {trans_name}",
@@ -2650,11 +2639,15 @@ class HTMLGenerator:
             eform_slug = slugify(eform.name) or str(abs(eform.form_no))
 
             def process_component(comp, parent_path=""):
+                nonlocal counter
                 comp_path = f"{parent_path} \u2192 {comp.label}" if parent_path else comp.label
 
                 # Custom default value
                 if comp.custom_default_value:
+                    counter += 1
                     customisations.append({
+                        'id': f"custom-{counter}",
+                        'nav_name': f"{eform.name} - {comp.label} (Default)",
                         'type': 'EForm Script',
                         'name': eform.name,
                         'description': f"{comp_path} - Custom Default Value",
@@ -2665,7 +2658,10 @@ class HTMLGenerator:
 
                 # Calculate value
                 if comp.calculate_value:
+                    counter += 1
                     customisations.append({
+                        'id': f"custom-{counter}",
+                        'nav_name': f"{eform.name} - {comp.label} (Calc)",
                         'type': 'EForm Script',
                         'name': eform.name,
                         'description': f"{comp_path} - Calculate Value",
@@ -2676,7 +2672,10 @@ class HTMLGenerator:
 
                 # Custom validation
                 if comp.validate_custom:
+                    counter += 1
                     customisations.append({
+                        'id': f"custom-{counter}",
+                        'nav_name': f"{eform.name} - {comp.label} (Validate)",
                         'type': 'EForm Script',
                         'name': eform.name,
                         'description': f"{comp_path} - Custom Validation",
@@ -2687,7 +2686,10 @@ class HTMLGenerator:
 
                 # Custom conditional
                 if comp.custom_conditional:
+                    counter += 1
                     customisations.append({
+                        'id': f"custom-{counter}",
+                        'nav_name': f"{eform.name} - {comp.label} (Conditional)",
                         'type': 'EForm Script',
                         'name': eform.name,
                         'description': f"{comp_path} - Custom Conditional",
@@ -2698,7 +2700,10 @@ class HTMLGenerator:
 
                 # Conditional show/when (if not using custom_conditional)
                 if comp.conditional_show and not comp.custom_conditional:
+                    counter += 1
                     customisations.append({
+                        'id': f"custom-{counter}",
+                        'nav_name': f"{eform.name} - {comp.label} (Show/Hide)",
                         'type': 'EForm Script',
                         'name': eform.name,
                         'description': f"{comp_path} - Conditional Display",
@@ -2714,9 +2719,11 @@ class HTMLGenerator:
             for component in eform.components:
                 process_component(component)
 
-        # If no customisations found, return empty string
-        if not customisations:
-            return ""
+        return customisations
+
+    def _generate_customisations_section(self) -> str:
+        """Generate the customisations section showing all scripts, REST calls, and special conditions."""
+        customisations = self._collect_customisations()
 
         # Build the HTML
         items = []
@@ -2740,7 +2747,7 @@ class HTMLGenerator:
                 code_resolved = self.config.resolve_field_macros(code_with_macros)
 
                 group_html += f'''
-                <div class="card" style="margin-bottom: 1rem;">
+                <div class="card" id="{custom['id']}" style="margin-bottom: 1rem;">
                     <div class="card-header" style="padding: 0.75rem 1rem;">
                         <h4 style="margin: 0; font-size: 1rem;">
                             <a href="{custom['link']}" style="color: var(--primary); text-decoration: none;">
