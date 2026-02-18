@@ -243,20 +243,19 @@ class HTMLGenerator:
             # Group by parent object (workflow/eform name)
             grouped = {}
             for custom in customisations:
-                parent_name = custom['name']
-                if parent_name not in grouped:
-                    grouped[parent_name] = {
+                group_name = custom['group_name']
+                if group_name not in grouped:
+                    grouped[group_name] = {
                         'count': 0,
-                        'first_id': custom['id'],
-                        'type': custom['type']
+                        'first_id': custom['id']
                     }
-                grouped[parent_name]['count'] += 1
+                grouped[group_name]['count'] += 1
             
             nav_items = []
-            for parent_name in sorted(grouped.keys()):
-                group = grouped[parent_name]
+            for group_name in sorted(grouped.keys()):
+                group = grouped[group_name]
                 # Use the first item's ID as the anchor
-                display_name = parent_name[:40] if len(parent_name) <= 40 else parent_name[:37] + '...'
+                display_name = group_name[:40] if len(group_name) <= 40 else group_name[:37] + '...'
                 count_suffix = f" ({group['count']})" if group['count'] > 1 else ""
                 nav_items.append(NAV_ITEM_TEMPLATE.format(
                     id=group['first_id'],
@@ -2599,6 +2598,7 @@ class HTMLGenerator:
                     customisations.append({
                         'id': f"custom-{counter}",
                         'nav_name': f"{workflow.name} - {task.name} (Script)",
+                        'group_name': workflow.name,
                         'type': 'Workflow Task Script',
                         'name': f"{workflow.name} - {task.name}",
                         'description': 'Initialization Script',
@@ -2623,6 +2623,7 @@ class HTMLGenerator:
                     customisations.append({
                         'id': f"custom-{counter}",
                         'nav_name': f"{workflow.name} - {call_name}",
+                        'group_name': workflow.name,
                         'type': 'REST Service Call',
                         'name': f"{workflow.name} - {task.name}",
                         'description': call_name,
@@ -2639,6 +2640,7 @@ class HTMLGenerator:
                         customisations.append({
                             'id': f"custom-{counter}",
                             'nav_name': f"{workflow.name} - {trans_name}",
+                            'group_name': workflow.name,
                             'type': 'Workflow Transition Condition',
                             'name': f"{workflow.name} - {task.name}",
                             'description': f"Transition: {trans_name}",
@@ -2661,6 +2663,7 @@ class HTMLGenerator:
                     customisations.append({
                         'id': f"custom-{counter}",
                         'nav_name': f"{eform.name} - {comp.label} (Default)",
+                        'group_name': eform.name,
                         'type': 'EForm Script',
                         'name': eform.name,
                         'description': f"{comp_path} - Custom Default Value",
@@ -2675,6 +2678,7 @@ class HTMLGenerator:
                     customisations.append({
                         'id': f"custom-{counter}",
                         'nav_name': f"{eform.name} - {comp.label} (Calc)",
+                        'group_name': eform.name,
                         'type': 'EForm Script',
                         'name': eform.name,
                         'description': f"{comp_path} - Calculate Value",
@@ -2689,6 +2693,7 @@ class HTMLGenerator:
                     customisations.append({
                         'id': f"custom-{counter}",
                         'nav_name': f"{eform.name} - {comp.label} (Validate)",
+                        'group_name': eform.name,
                         'type': 'EForm Script',
                         'name': eform.name,
                         'description': f"{comp_path} - Custom Validation",
@@ -2703,6 +2708,7 @@ class HTMLGenerator:
                     customisations.append({
                         'id': f"custom-{counter}",
                         'nav_name': f"{eform.name} - {comp.label} (Conditional)",
+                        'group_name': eform.name,
                         'type': 'EForm Script',
                         'name': eform.name,
                         'description': f"{comp_path} - Custom Conditional",
@@ -2717,6 +2723,7 @@ class HTMLGenerator:
                     customisations.append({
                         'id': f"custom-{counter}",
                         'nav_name': f"{eform.name} - {comp.label} (Show/Hide)",
+                        'group_name': eform.name,
                         'type': 'EForm Script',
                         'name': eform.name,
                         'description': f"{comp_path} - Conditional Display",
